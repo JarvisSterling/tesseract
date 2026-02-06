@@ -869,14 +869,20 @@ export default function Dashboard() {
                         <td 
                           className="py-1 px-2 cursor-pointer hover:bg-zinc-700/30 rounded transition-all"
                           onClick={(e) => {
+                            e.preventDefault();
                             e.stopPropagation();
                             setSelectedCrypto(crypto);
                           }}
                           title="Click to view chart"
                         >
-                          {crypto.recentPrices.length > 5 && (
-                            <MiniCandleChart data={crypto.recentPrices} width={80} height={28} />
-                          )}
+                          <div 
+                            className="pointer-events-none"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {crypto.recentPrices.length > 5 && (
+                              <MiniCandleChart data={crypto.recentPrices} width={80} height={28} />
+                            )}
+                          </div>
                         </td>
                         
                         {/* Price */}
