@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createChart, ColorType, IChartApi, AreaSeries } from 'lightweight-charts';
-import { X, ExternalLink, TrendingUp, TrendingDown, Minus, Target, Zap, BarChart3, GitBranch } from 'lucide-react';
+import { X, ExternalLink, TrendingUp, TrendingDown, Minus, Target, Zap, BarChart3, GitBranch, Calculator } from 'lucide-react';
 import { StrategySignals } from './StrategySignals';
+import { PositionCalculator } from './PositionCalculator';
 
 interface TimeframeData {
   stack: 'bull' | 'bear' | 'mixed';
@@ -40,6 +41,7 @@ interface ChartModalProps {
     rsi: Record<string, number | null>;
     timeframes: Record<string, TimeframeData>;
     strategies?: StrategyResult[];
+    atr?: { value: number | null; percent: number | null };
   };
   livePrice?: number;
   liveChange?: number;
@@ -91,6 +93,12 @@ export function ChartModal({ crypto, livePrice, liveChange, onClose }: ChartModa
   // Track price direction for flash effect
   const [priceDirection, setPriceDirection] = useState<'up' | 'down' | null>(null);
   const prevPriceRef = useRef<number>(displayPrice);
+  
+  // Position calculator modal
+  const [showCalculator, setShowCalculator] = useState(false);
+  
+  // Get best signal for calculator defaults
+  const bestSignal = crypto.strategies?.find(s => s.signal.type !== 'NEUTRAL' && s.signal.entry && s.signal.stop && s.signal.target);
   
   // Update chart with live price
   useEffect(() => {
@@ -234,6 +242,13 @@ export function ChartModal({ crypto, livePrice, liveChange, onClose }: ChartModa
                 >
                   <ExternalLink size={16} />
                 </a>
+                <button
+                  onClick={() => setShowCalculator(true)}
+                  className="text-zinc-500 hover:text-indigo-400 transition-colors"
+                  title="Position Calculator"
+                >
+                  <Calculator size={16} />
+                </button>
               </div>
               <div className="flex items-center gap-3 mt-1">
                 <span className={`text-2xl font-mono font-bold transition-colors duration-150 ${
@@ -360,6 +375,18 @@ export function ChartModal({ crypto, livePrice, liveChange, onClose }: ChartModa
           </div>
         )}
       </div>
+      
+      {/* Position Calculator Modal */}
+      {showCalculator && (
+        <PositionCalculator
+          symbol={crypto.symbol}
+          currentPrice={displayPrice}
+          suggestedStop={bestSignal?.signal.stop}
+          suggestedTarget={bestSignal?.signal.target}
+          atrPercent={crypto.atr?.percent ?? undefined}
+          onClose={() => setShowCalculator(false)}
+        />
+      )}
     </div>
   );
 }

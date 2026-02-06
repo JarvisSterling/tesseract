@@ -61,12 +61,14 @@ interface CryptoData {
   rsi: Record<string, number | null>;
   recentPrices: number[];
   strategies: StrategyResult[];
+  volume?: { ratio: number; trend: 'high' | 'normal' | 'low' };
+  atr?: { value: number | null; percent: number | null };
   livePrice?: number;
   liveChange24h?: number;
   liveEMAs?: Record<number, number>;
 }
 
-type SortField = 'symbol' | 'price' | 'change' | 'signal' | 'confluence' | 'rsi' | 'strategies';
+type SortField = 'symbol' | 'price' | 'change' | 'signal' | 'confluence' | 'rsi' | 'strategies' | 'volume' | 'atr' | 'heat';
 type SortDir = 'asc' | 'desc';
 type FilterMode = 'all' | 'long' | 'short' | 'strong';
 
@@ -344,6 +346,18 @@ export default function Dashboard() {
     setTrackedSignals(loadSignals());
   }, []);
   
+  // Sound alert for new signals
+  const playAlertSound = useCallback(() => {
+    if (typeof window !== 'undefined' && soundEnabled) {
+      const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2JkpOQhXZwaHN+iZGTkIV0bGZxfYmSk5CFdGxmcX2JkpOQhXRsZnF9iZKTkIV0bGZxfYmSk5CFdGxmcX2JkpOQhQ==');
+      audio.volume = 0.3;
+      audio.play().catch(() => {}); // Ignore errors
+    }
+  }, [soundEnabled]);
+  
+  // Track previous signal count for alert detection
+  const prevSignalCountRef = useRef(0);
+  
   // WebSocket for real-time prices and EMAs
   const { prices: wsPrices, connected, lastUpdate: wsLastUpdate, initializeEMAs } = useBinanceWebSocket(watchlist);
   
@@ -455,6 +469,8 @@ export default function Dashboard() {
         setTrackedSignals(prev => {
           // Check if already exists
           if (prev.some(s => s.id === newSignal.id)) return prev;
+          // Play alert sound for new signal
+          playAlertSound();
           return [...prev, newSignal];
         });
       }
@@ -545,6 +561,23 @@ export default function Dashboard() {
           const bActive = (b.strategies || []).filter(s => s.signal.type !== 'NEUTRAL').length;
           aVal = aActive;
           bVal = bActive;
+          break;
+        case 'volume':
+          aVal = a.volume?.ratio ?? 1;
+          bVal = b.volume?.ratio ?? 1;
+          break;
+        case 'atr':
+          aVal = a.atr?.percent ?? 0;
+          bVal = b.atr?.percent ?? 0;
+          break;
+        case 'heat':
+          // Heat score = active strategies * avg strength + volume bonus + confluence
+          const aStrategies = (a.strategies || []).filter(s => s.signal.type !== 'NEUTRAL');
+          const bStrategies = (b.strategies || []).filter(s => s.signal.type !== 'NEUTRAL');
+          const aAvgStrength = aStrategies.length > 0 ? aStrategies.reduce((sum, s) => sum + s.signal.strength, 0) / aStrategies.length : 0;
+          const bAvgStrength = bStrategies.length > 0 ? bStrategies.reduce((sum, s) => sum + s.signal.strength, 0) / bStrategies.length : 0;
+          aVal = (aStrategies.length * 20) + aAvgStrength + (a.volume?.ratio ?? 1) * 10 + (a.confluence.score - 50);
+          bVal = (bStrategies.length * 20) + bAvgStrength + (b.volume?.ratio ?? 1) * 10 + (b.confluence.score - 50);
           break;
         default:
           return 0;
@@ -794,6 +827,15 @@ export default function Dashboard() {
                     <th className="text-center py-2 px-2">
                       <SortHeader label="Strategies" field="strategies" currentSort={sort} onSort={handleSort} />
                     </th>
+                    <th className="text-center py-2 px-2">
+                      <SortHeader label="Vol" field="volume" currentSort={sort} onSort={handleSort} />
+                    </th>
+                    <th className="text-center py-2 px-2">
+                      <SortHeader label="ATR%" field="atr" currentSort={sort} onSort={handleSort} />
+                    </th>
+                    <th className="text-center py-2 px-2">
+                      <SortHeader label="🔥Heat" field="heat" currentSort={sort} onSort={handleSort} />
+                    </th>
                     {visibleTFs.map(tf => (
                       <th key={tf} className="text-center py-2 px-2 border-l border-zinc-800/30" colSpan={EMA_PERIODS.length + 1}>
                         <span className="text-[10px] text-zinc-400 font-semibold">{tf}</span>
@@ -801,7 +843,7 @@ export default function Dashboard() {
                     ))}
                   </tr>
                   <tr className="border-b border-zinc-800/30 bg-zinc-900/50">
-                    <th colSpan={8}></th>
+                    <th colSpan={11}></th>
                     {visibleTFs.map(tf => (
                       <th key={`${tf}-sub`} className="contents">
                         {EMA_PERIODS.map(period => (
@@ -937,6 +979,56 @@ export default function Dashboard() {
                         {/* Strategies */}
                         <td className="py-2 px-2 text-center">
                           <StrategyBadges strategies={crypto.strategies || []} />
+                        </td>
+                        
+                        {/* Volume */}
+                        <td className="py-2 px-2 text-center">
+                          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                            (crypto.volume?.ratio ?? 1) >= 1.5 
+                              ? 'bg-amber-500/20 text-amber-400' 
+                              : (crypto.volume?.ratio ?? 1) >= 1.0 
+                                ? 'text-zinc-400' 
+                                : 'text-zinc-600'
+                          }`}>
+                            {(crypto.volume?.ratio ?? 1).toFixed(1)}x
+                          </span>
+                        </td>
+                        
+                        {/* ATR% */}
+                        <td className="py-2 px-2 text-center">
+                          <span className={`text-[10px] font-mono ${
+                            (crypto.atr?.percent ?? 0) >= 3 
+                              ? 'text-rose-400' 
+                              : (crypto.atr?.percent ?? 0) >= 1.5 
+                                ? 'text-amber-400' 
+                                : 'text-zinc-400'
+                          }`}>
+                            {crypto.atr?.percent?.toFixed(1) ?? '-'}%
+                          </span>
+                        </td>
+                        
+                        {/* Heat Score */}
+                        <td className="py-2 px-2 text-center">
+                          {(() => {
+                            const activeStrats = (crypto.strategies || []).filter(s => s.signal.type !== 'NEUTRAL');
+                            const avgStrength = activeStrats.length > 0 
+                              ? activeStrats.reduce((sum, s) => sum + s.signal.strength, 0) / activeStrats.length 
+                              : 0;
+                            const heat = (activeStrats.length * 20) + avgStrength + ((crypto.volume?.ratio ?? 1) - 1) * 20 + (crypto.confluence.score - 50);
+                            const isHot = heat >= 50;
+                            const isWarm = heat >= 25;
+                            return (
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                isHot 
+                                  ? 'bg-orange-500/20 text-orange-400' 
+                                  : isWarm 
+                                    ? 'bg-yellow-500/10 text-yellow-400' 
+                                    : 'text-zinc-600'
+                              }`}>
+                                {isHot ? '🔥' : isWarm ? '🌡️' : ''}{Math.round(heat)}
+                              </span>
+                            );
+                          })()}
                         </td>
                         
                         {/* Timeframes - Live Updated */}

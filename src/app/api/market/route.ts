@@ -565,7 +565,16 @@ async function analyzeSymbol(
     tradeSignal: signalData,
     rsi: { '1h': rsi1h },
     recentPrices,
-    strategies, // NEW: Strategy signals
+    strategies,
+    // Volume & Volatility data
+    volume: {
+      ratio: volume1h.ratio,
+      trend: volume1h.ratio >= 1.5 ? 'high' : volume1h.ratio >= 1.0 ? 'normal' : 'low',
+    },
+    atr: {
+      value: atr1h,
+      percent: atr1h && price > 0 ? (atr1h / price) * 100 : null, // ATR as % of price
+    },
   };
 }
 
