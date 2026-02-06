@@ -13,6 +13,7 @@ import { PairSelector, loadSavedPairs, DEFAULT_PAIRS } from '@/components/PairSe
 import { StrategyBadges } from '@/components/StrategySignals';
 import { TabNav, TabId } from '@/components/TabNav';
 import { SignalsTab } from '@/components/SignalsTab';
+import { StatsTab } from '@/components/StatsTab';
 import { 
   TrackedSignal, 
   loadSignals, 
@@ -686,11 +687,7 @@ export default function Dashboard() {
       {/* Stats Tab */}
       {activeTab === 'stats' && (
         <div className="max-w-[2400px] mx-auto px-4 py-4">
-          <div className="text-center py-12 text-zinc-500">
-            <BarChart3 size={48} className="mx-auto mb-3 opacity-20" />
-            <p className="text-sm">Advanced Analytics Coming Soon</p>
-            <p className="text-xs mt-1">Backtest results, equity curves, drawdown analysis</p>
-          </div>
+          <StatsTab signals={trackedSignals} />
         </div>
       )}
       
