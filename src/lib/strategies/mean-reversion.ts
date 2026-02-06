@@ -185,14 +185,14 @@ function hasEmaSupport(
   if (!ema100 && !ema200) return true; // Not enough data, give benefit of doubt
   
   if (direction === 'bullish') {
-    // For bullish reversal, price should be near or above EMA100/200 (support)
-    // Don't try to catch falling knives way below all EMAs
-    if (ema200 && price < ema200 * 0.95) return false; // More than 5% below EMA200
-    if (ema100 && price < ema100 * 0.92) return false; // More than 8% below EMA100
+    // For bullish reversal, avoid extreme falling knives
+    // V3: Loosened from 5%/8% to 8%/12%
+    if (ema200 && price < ema200 * 0.92) return false; // More than 8% below EMA200
+    if (ema100 && price < ema100 * 0.88) return false; // More than 12% below EMA100
   } else {
-    // For bearish reversal, price should be near or below EMA100/200 (resistance)
-    if (ema200 && price > ema200 * 1.05) return false; // More than 5% above EMA200
-    if (ema100 && price > ema100 * 1.08) return false; // More than 8% above EMA100
+    // For bearish reversal, avoid extreme extensions above
+    if (ema200 && price > ema200 * 1.08) return false; // More than 8% above EMA200
+    if (ema100 && price > ema100 * 1.12) return false; // More than 12% above EMA100
   }
   
   return true;
@@ -265,26 +265,26 @@ export const meanReversion: Strategy = {
       };
     }
     
-    // Gate 4: REQUIRE strong reversal pattern (no weak patterns)
+    // Pattern detection (V3: bonus instead of gate)
     const pattern = detectReversalPattern(candles, expectedDirection);
-    if (!pattern.isReversal || pattern.type !== expectedDirection) {
-      return {
-        type: 'NEUTRAL',
-        strength: 0,
-        reasons: [`Extended ${deviation.deviation.toFixed(1)}% but no reversal pattern yet`],
-      };
-    }
     
-    // Passed all gates - now score the signal
+    // Start scoring the signal
     const reasons: string[] = [];
     let score = 0;
     
     reasons.push(`Price ${deviation.deviation.toFixed(1)}% from EMA21 (${deviation.direction})`);
-    reasons.push(`✓ ${pattern.pattern} confirmed`);
     
-    // Base score from extension + pattern
-    score += Math.min(deviation.extensionStrength * 8, 25); // Extension
-    score += pattern.strength * 0.4; // Pattern (max ~36 pts)
+    // Base score from extension
+    score += Math.min(deviation.extensionStrength * 12, 35); // Extension
+    
+    // Pattern bonus (not required, but helps)
+    if (pattern.isReversal && pattern.type === expectedDirection) {
+      score += pattern.strength * 0.35;
+      reasons.push(`✓ ${pattern.pattern} confirmed`);
+    } else {
+      // No pattern - reduced confidence but still possible
+      reasons.push('⏳ Awaiting pattern confirmation');
+    }
     
     // RSI confirmation (V3: slightly more lenient scoring)
     if (rsi !== null) {
