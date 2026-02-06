@@ -14,18 +14,33 @@ import { dynamicBounce } from './dynamic-bounce';
 import { crossoverCascade } from './crossover-cascade';
 import { divergenceHunter } from './divergence-hunter';
 import { macdMomentum } from './macd-momentum';
+import { bollingerSqueeze } from './bollinger-squeeze';
+import { volumeBreakout } from './volume-breakout';
+import { meanReversion } from './mean-reversion';
 
 // ============================================
 // STRATEGY REGISTRY
 // ============================================
 
 export const STRATEGIES: Strategy[] = [
+  // Swing Trading
   ribbonRider,
-  compressionCannon,
-  dynamicBounce,
-  crossoverCascade,
-  divergenceHunter,
   macdMomentum,
+  
+  // Breakout
+  compressionCannon,
+  bollingerSqueeze,
+  volumeBreakout,
+  
+  // Scalping
+  dynamicBounce,
+  
+  // Momentum
+  crossoverCascade,
+  
+  // Reversal
+  divergenceHunter,
+  meanReversion,
 ];
 
 export const STRATEGY_MAP = new Map<string, Strategy>(
