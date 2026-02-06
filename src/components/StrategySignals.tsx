@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Target, TrendingUp, TrendingDown, Zap, BarChart3, GitBranch } from 'lucide-react';
+import { ChevronDown, ChevronUp, Target, TrendingUp, TrendingDown, Zap, BarChart3, GitBranch, Activity } from 'lucide-react';
 
 interface StrategySignal {
   type: 'STRONG_LONG' | 'LONG' | 'NEUTRAL' | 'SHORT' | 'STRONG_SHORT';
@@ -30,6 +30,7 @@ const STRATEGY_ICONS: Record<string, React.ReactNode> = {
   'dynamic-bounce': <BarChart3 size={12} />,
   'crossover-cascade': <GitBranch size={12} />,
   'divergence-hunter': <Target size={12} />,
+  'macd-momentum': <Activity size={12} />,
 };
 
 const CATEGORY_COLORS: Record<string, string> = {

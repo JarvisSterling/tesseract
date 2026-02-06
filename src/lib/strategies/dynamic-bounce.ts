@@ -174,7 +174,7 @@ export const dynamicBounce: Strategy = {
   
   evaluate: (input: StrategyInput): StrategySignal => {
     const { price, candles, indicators } = input;
-    const { emas, rsi } = indicators;
+    const { emas, rsi, atr } = indicators;
     
     const trend = detectTrend(price, emas.values[200]);
     
@@ -223,28 +223,27 @@ export const dynamicBounce: Strategy = {
     let stop: number | undefined;
     let target: number | undefined;
     
-    const ema9 = emas.values[9];
-    const ema21 = emas.values[21];
-    const ema50 = emas.values[50];
+    // Scalping uses tighter ATR multiplier
+    const atrStop = atr ? atr * 0.8 : price * 0.01;
     
     if (finalScore >= 70) {
       signal = trend === 'up' ? 'STRONG_LONG' : 'STRONG_SHORT';
-      // Tight stops for scalping
+      // Tight ATR-based stops for scalping
       if (trend === 'up') {
-        stop = bounceZone.level * 0.995; // Just below support
-        if (ema9) target = ema9 * 1.005; // Quick scalp to EMA9
+        stop = Math.max(price - atrStop, bounceZone.level * 0.995);
+        target = price + (atrStop * 1.5); // Quick 1.5:1 scalp target
       } else {
-        stop = bounceZone.level * 1.005; // Just above resistance
-        if (ema9) target = ema9 * 0.995;
+        stop = Math.min(price + atrStop, bounceZone.level * 1.005);
+        target = price - (atrStop * 1.5);
       }
     } else if (finalScore >= 50) {
       signal = trend === 'up' ? 'LONG' : 'SHORT';
       if (trend === 'up') {
-        stop = bounceZone.level * 0.99;
-        target = price * 1.015;
+        stop = Math.max(price - atrStop, bounceZone.level * 0.99);
+        target = price + atrStop; // 1:1 for lower confidence
       } else {
-        stop = bounceZone.level * 1.01;
-        target = price * 0.985;
+        stop = Math.min(price + atrStop, bounceZone.level * 1.01);
+        target = price - atrStop;
       }
     }
     

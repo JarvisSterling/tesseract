@@ -82,6 +82,77 @@ function calcEMASeries(prices: number[], period: number): number[] {
   return series;
 }
 
+// ATR (Average True Range) - Wilder's smoothing
+function calcATR(candles: { high: number; low: number; close: number }[], period = 14): number | null {
+  if (candles.length < period + 1) return null;
+  
+  const trueRanges: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const high = candles[i].high;
+    const low = candles[i].low;
+    const prevClose = candles[i - 1].close;
+    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+    trueRanges.push(tr);
+  }
+  
+  if (trueRanges.length < period) return null;
+  
+  // First ATR is simple average
+  let atr = trueRanges.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  
+  // Wilder's smoothing for subsequent values
+  for (let i = period; i < trueRanges.length; i++) {
+    atr = (atr * (period - 1) + trueRanges[i]) / period;
+  }
+  
+  return atr;
+}
+
+// MACD calculation
+interface MACDResult {
+  macd: number;
+  signal: number;
+  histogram: number;
+  trend: 'bullish' | 'bearish' | 'neutral';
+}
+
+function calcMACD(prices: number[], fast = 12, slow = 26, signal = 9): MACDResult | null {
+  if (prices.length < slow + signal) return null;
+  
+  const emaFast = calcEMASeries(prices, fast);
+  const emaSlow = calcEMASeries(prices, slow);
+  
+  if (emaFast.length < signal || emaSlow.length < signal) return null;
+  
+  // MACD line = Fast EMA - Slow EMA
+  const macdLine: number[] = [];
+  const offset = emaSlow.length - emaFast.length;
+  
+  for (let i = 0; i < emaSlow.length; i++) {
+    const fastIdx = i - offset;
+    if (fastIdx >= 0 && fastIdx < emaFast.length) {
+      macdLine.push(emaFast[fastIdx] - emaSlow[i]);
+    }
+  }
+  
+  if (macdLine.length < signal) return null;
+  
+  // Signal line = 9-period EMA of MACD
+  const signalLine = calcEMASeries(macdLine, signal);
+  if (signalLine.length === 0) return null;
+  
+  const currentMACD = macdLine[macdLine.length - 1];
+  const currentSignal = signalLine[signalLine.length - 1];
+  const histogram = currentMACD - currentSignal;
+  
+  // Determine trend
+  let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+  if (histogram > 0 && currentMACD > 0) trend = 'bullish';
+  else if (histogram < 0 && currentMACD < 0) trend = 'bearish';
+  
+  return { macd: currentMACD, signal: currentSignal, histogram, trend };
+}
+
 function calcRSI(prices: number[], period = 14): number | null {
   if (prices.length < period + 1) return null;
   let avgGain = 0, avgLoss = 0;
@@ -224,6 +295,8 @@ async function analyzeSymbol(
   let emaSeries1h: Record<number, number[]> = {};
   let emaSlopes1h: Record<number, number | null> = {};
   let volume1h = { current: 0, average: 0, ratio: 1 };
+  let atr1h: number | null = null;
+  let macd1h: MACDResult | null = null;
 
   // Fetch all timeframes in parallel
   const klinesPromises = TIMEFRAMES.map(async (tf) => {
@@ -297,6 +370,12 @@ async function analyzeSymbol(
         average: avgVol,
         ratio: avgVol > 0 ? (volumes[volumes.length - 1] || 0) / avgVol : 1,
       };
+      
+      // ATR for volatility and stop-loss calculation
+      atr1h = calcATR(candles1h, 14);
+      
+      // MACD for momentum confirmation
+      macd1h = calcMACD(closePrices, 12, 26, 9);
     }
   }
 
@@ -324,8 +403,9 @@ async function analyzeSymbol(
           slopes: emaSlopes1h,
         },
         rsi: rsi1h,
+        macd: macd1h,
+        atr: atr1h,
         rsiSeries: rsiSeries1h,
-        atr: null, // TODO: Add ATR calculation
         volume: volume1h,
       },
     };

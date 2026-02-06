@@ -108,7 +108,7 @@ export const ribbonRider: Strategy = {
   
   evaluate: (input: StrategyInput): StrategySignal => {
     const { price, indicators } = input;
-    const { emas, rsi } = indicators;
+    const { emas, rsi, atr, volume } = indicators;
     
     // Check for bull stack
     const bullStackScore = calculateStackScore(emas.values, true);
@@ -147,10 +147,14 @@ export const ribbonRider: Strategy = {
     
     if (rsiScore >= 80) reasons.push('RSI in optimal zone');
     
-    // Calculate stops and targets
-    const ema21 = emas.values[21];
+    // Calculate stops and targets using ATR
     const ema50 = emas.values[50];
-    const ema9 = emas.values[9];
+    const atrStop = atr ? atr * 1.5 : price * 0.02; // Default 2% if no ATR
+    
+    // Volume confirmation bonus
+    if (volume.ratio > 1.3) {
+      reasons.push(`Volume ${((volume.ratio - 1) * 100).toFixed(0)}% above average`);
+    }
     
     let signal: SignalType = 'NEUTRAL';
     let stop: number | undefined;
@@ -158,12 +162,16 @@ export const ribbonRider: Strategy = {
     
     if (finalScore >= 75) {
       signal = isBull ? 'STRONG_LONG' : 'STRONG_SHORT';
-      if (ema50) stop = isBull ? ema50 * 0.99 : ema50 * 1.01;
-      if (ema9) target = isBull ? price * 1.05 : price * 0.95;
+      // Use ATR-based stops (1.5x ATR from entry)
+      stop = isBull ? price - atrStop : price + atrStop;
+      // Target: 2.5x risk-reward
+      target = isBull ? price + (atrStop * 2.5) : price - (atrStop * 2.5);
     } else if (finalScore >= 55) {
       signal = isBull ? 'LONG' : 'SHORT';
-      if (ema50) stop = isBull ? ema50 * 0.99 : ema50 * 1.01;
-      if (ema9) target = isBull ? price * 1.03 : price * 0.97;
+      // Tighter stop for less confident signals
+      stop = isBull ? Math.max(price - atrStop, ema50 ? ema50 * 0.995 : price * 0.98) 
+                    : Math.min(price + atrStop, ema50 ? ema50 * 1.005 : price * 1.02);
+      target = isBull ? price + (atrStop * 2) : price - (atrStop * 2);
     }
     
     return {

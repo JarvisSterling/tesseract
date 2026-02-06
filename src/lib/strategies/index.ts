@@ -13,6 +13,7 @@ import { compressionCannon } from './compression-cannon';
 import { dynamicBounce } from './dynamic-bounce';
 import { crossoverCascade } from './crossover-cascade';
 import { divergenceHunter } from './divergence-hunter';
+import { macdMomentum } from './macd-momentum';
 
 // ============================================
 // STRATEGY REGISTRY
@@ -24,6 +25,7 @@ export const STRATEGIES: Strategy[] = [
   dynamicBounce,
   crossoverCascade,
   divergenceHunter,
+  macdMomentum,
 ];
 
 export const STRATEGY_MAP = new Map<string, Strategy>(

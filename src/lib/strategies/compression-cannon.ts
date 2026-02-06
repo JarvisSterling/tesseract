@@ -133,7 +133,7 @@ export const compressionCannon: Strategy = {
   
   evaluate: (input: StrategyInput): StrategySignal => {
     const { price, candles, indicators } = input;
-    const { emas, volume } = indicators;
+    const { emas, volume, atr } = indicators;
     
     const bandwidth = calculateBandwidth(emas.values);
     const { score: compressionScore, isCompressing, compressionRate } = 
@@ -185,9 +185,8 @@ export const compressionCannon: Strategy = {
     // Final score: compression quality + breakout strength + volume
     const finalScore = (compressionScore * 0.4) + (breakout.strength * 0.4) + (volumeScore * 0.2);
     
-    const ema9 = emas.values[9];
     const ema21 = emas.values[21];
-    const ema50 = emas.values[50];
+    const atrStop = atr ? atr * 1.2 : price * 0.015; // Tighter stop for breakouts
     
     let signal: SignalType = 'NEUTRAL';
     let stop: number | undefined;
@@ -195,18 +194,22 @@ export const compressionCannon: Strategy = {
     
     if (finalScore >= 70) {
       signal = breakout.direction === 'bull' ? 'STRONG_LONG' : 'STRONG_SHORT';
-      // Tight stop just inside the compression zone
-      if (ema21) stop = breakout.direction === 'bull' ? ema21 * 0.99 : ema21 * 1.01;
-      // Target: measure of compression projected as expansion
-      if (bandwidth !== null) {
-        const expansionTarget = bandwidth * 2; // Expect 2x bandwidth expansion
-        target = breakout.direction === 'bull' 
-          ? price * (1 + expansionTarget / 100)
-          : price * (1 - expansionTarget / 100);
-      }
+      // ATR-based stop, but also consider EMA21 as support
+      const emaStop = ema21 ? (breakout.direction === 'bull' ? ema21 * 0.995 : ema21 * 1.005) : null;
+      stop = breakout.direction === 'bull' 
+        ? Math.max(price - atrStop, emaStop || 0)
+        : Math.min(price + atrStop, emaStop || Infinity);
+      
+      // Target: 3x risk (breakouts often run)
+      target = breakout.direction === 'bull' 
+        ? price + (atrStop * 3)
+        : price - (atrStop * 3);
     } else if (finalScore >= 50) {
       signal = breakout.direction === 'bull' ? 'LONG' : 'SHORT';
-      if (ema50) stop = breakout.direction === 'bull' ? ema50 * 0.99 : ema50 * 1.01;
+      stop = breakout.direction === 'bull' ? price - atrStop : price + atrStop;
+      target = breakout.direction === 'bull' 
+        ? price + (atrStop * 2)
+        : price - (atrStop * 2);
     }
     
     return {

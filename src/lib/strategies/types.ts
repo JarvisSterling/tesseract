@@ -37,11 +37,19 @@ export interface EMAData {
   slopes: Record<number, number | null>;  // period -> slope %
 }
 
+export interface MACDData {
+  macd: number;
+  signal: number;
+  histogram: number;
+  trend: 'bullish' | 'bearish' | 'neutral';
+}
+
 export interface IndicatorData {
   emas: EMAData;
   rsi: number | null;
   rsiSeries: number[];
   atr: number | null;
+  macd: MACDData | null;
   volume: {
     current: number;
     average: number;
