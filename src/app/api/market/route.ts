@@ -12,19 +12,28 @@ import { NextResponse } from 'next/server';
 // Use Binance.US API since Vercel servers are in the US
 const BINANCE_API = 'https://api.binance.us/api/v3';
 
-// Symbols available on Binance.US
-const SYMBOLS = [
-  'BTCUSD', 'ETHUSD', 'BNBUSD', 'XRPUSD', 'SOLUSD',
-  'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'DOTUSD', 'LINKUSD',
-  'MATICUSD', 'LTCUSD', 'UNIUSD', 'ATOMUSD', 'APTUSD',
+// Default symbols if none specified
+const DEFAULT_SYMBOLS = [
+  'BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'ADA', 'DOGE', 'AVAX',
+  'DOT', 'LINK', 'MATIC', 'LTC', 'UNI', 'ATOM', 'APT'
 ];
 
+// Known names for popular symbols
 const SYMBOL_NAMES: Record<string, string> = {
-  BTCUSD: 'Bitcoin', ETHUSD: 'Ethereum', BNBUSD: 'BNB',
-  XRPUSD: 'XRP', SOLUSD: 'Solana', ADAUSD: 'Cardano',
-  DOGEUSD: 'Dogecoin', AVAXUSD: 'Avalanche', DOTUSD: 'Polkadot',
-  LINKUSD: 'Chainlink', MATICUSD: 'Polygon', LTCUSD: 'Litecoin',
-  UNIUSD: 'Uniswap', ATOMUSD: 'Cosmos', APTUSD: 'Aptos',
+  BTC: 'Bitcoin', ETH: 'Ethereum', BNB: 'BNB', XRP: 'XRP',
+  SOL: 'Solana', ADA: 'Cardano', DOGE: 'Dogecoin', AVAX: 'Avalanche',
+  DOT: 'Polkadot', LINK: 'Chainlink', MATIC: 'Polygon', LTC: 'Litecoin',
+  UNI: 'Uniswap', ATOM: 'Cosmos', APT: 'Aptos', SHIB: 'Shiba Inu',
+  PEPE: 'Pepe', WIF: 'dogwifhat', BONK: 'Bonk', FLOKI: 'Floki',
+  ARB: 'Arbitrum', OP: 'Optimism', INJ: 'Injective', SUI: 'Sui',
+  SEI: 'Sei', TIA: 'Celestia', NEAR: 'NEAR', FTM: 'Fantom',
+  ALGO: 'Algorand', XLM: 'Stellar', VET: 'VeChain', ICP: 'Internet Computer',
+  FIL: 'Filecoin', AAVE: 'Aave', MKR: 'Maker', CRV: 'Curve',
+  SNX: 'Synthetix', COMP: 'Compound', YFI: 'Yearn', SUSHI: 'SushiSwap',
+  SAND: 'The Sandbox', MANA: 'Decentraland', AXS: 'Axie Infinity',
+  ENS: 'Ethereum Name Service', LDO: 'Lido', RPL: 'Rocket Pool',
+  GMX: 'GMX', DYDX: 'dYdX', GRT: 'The Graph', RNDR: 'Render',
+  OCEAN: 'Ocean Protocol', FET: 'Fetch.ai', AGIX: 'SingularityNET',
 };
 
 const TIMEFRAMES = [
@@ -193,11 +202,11 @@ async function fetchWithRetry(url: string, retries = 2): Promise<any> {
 }
 
 async function analyzeSymbol(
-  symbol: string,
+  baseSymbol: string,
   price: number,
   change24h: number
 ): Promise<any> {
-  const baseSymbol = symbol.replace('USD', '');
+  const usdSymbol = `${baseSymbol}USD`; // Binance.US uses USD pairs
   const tfData: Record<string, any> = {};
   let rsi1h: number | null = null;
   let slope21_1h: number | null = null;
@@ -208,7 +217,7 @@ async function analyzeSymbol(
   const klinesPromises = TIMEFRAMES.map(async (tf) => {
     try {
       const klines = await fetchWithRetry(
-        `${BINANCE_API}/klines?symbol=${symbol}&interval=${tf.interval}&limit=${tf.limit}`
+        `${BINANCE_API}/klines?symbol=${usdSymbol}&interval=${tf.interval}&limit=${tf.limit}`
       );
       return { tf, klines };
     } catch {
@@ -260,7 +269,7 @@ async function analyzeSymbol(
 
   return {
     symbol: baseSymbol,
-    name: SYMBOL_NAMES[symbol] || baseSymbol,
+    name: SYMBOL_NAMES[baseSymbol] || baseSymbol,
     price,
     priceChange24h: change24h,
     timeframes: tfData,
@@ -278,8 +287,18 @@ async function analyzeSymbol(
 // API HANDLER
 // ============================================
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    // Get symbols from query params or use defaults
+    const { searchParams } = new URL(request.url);
+    const symbolsParam = searchParams.get('symbols');
+    const symbols = symbolsParam 
+      ? symbolsParam.split(',').map(s => s.trim().toUpperCase())
+      : DEFAULT_SYMBOLS;
+    
+    // Build USD symbol list for Binance.US
+    const usdSymbols = symbols.map(s => `${s}USD`);
+    
     // Fetch all prices and 24h changes in parallel
     const [pricesData, tickerData] = await Promise.all([
       fetchWithRetry(`${BINANCE_API}/ticker/price`),
@@ -296,23 +315,27 @@ export async function GET() {
       changes[item.symbol] = parseFloat(item.priceChangePercent);
     }
 
+    // Filter to only symbols that exist on Binance.US
+    const availableSymbols = symbols.filter(s => prices[`${s}USD`]);
+
     // Analyze symbols in batches of 5 to avoid rate limits
     const results: any[] = [];
     const batchSize = 5;
     
-    for (let i = 0; i < SYMBOLS.length; i += batchSize) {
-      const batch = SYMBOLS.slice(i, i + batchSize);
+    for (let i = 0; i < availableSymbols.length; i += batchSize) {
+      const batch = availableSymbols.slice(i, i + batchSize);
       const batchPromises = batch.map(symbol => {
-        const price = prices[symbol];
+        const usdSymbol = `${symbol}USD`;
+        const price = prices[usdSymbol];
         if (!price) return null;
-        return analyzeSymbol(symbol, price, changes[symbol] || 0);
+        return analyzeSymbol(symbol, price, changes[usdSymbol] || 0);
       }).filter(Boolean);
       
       const batchResults = await Promise.all(batchPromises as Promise<any>[]);
       results.push(...batchResults.filter(Boolean));
       
       // Small delay between batches
-      if (i + batchSize < SYMBOLS.length) {
+      if (i + batchSize < availableSymbols.length) {
         await new Promise(r => setTimeout(r, 100));
       }
     }

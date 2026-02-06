@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 
 interface TickerData {
   symbol: string;
@@ -34,13 +34,6 @@ interface WebSocketState {
 // Global Binance WebSocket (client-side runs in user's browser, not US-restricted)
 const WS_URL = 'wss://stream.binance.com:9443/ws/!ticker@arr';
 
-// Symbols we care about - USDT pairs on global Binance
-const TRACKED_SYMBOLS = new Set([
-  'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'SOLUSDT',
-  'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'DOTUSDT', 'LINKUSDT',
-  'MATICUSDT', 'LTCUSDT', 'UNIUSDT', 'ATOMUSDT', 'APTUSDT',
-]);
-
 export interface LiveEMAs {
   [period: number]: number;
 }
@@ -50,13 +43,18 @@ export interface LiveTickerData extends TickerData {
   prevPrice?: number;
 }
 
-export function useBinanceWebSocket(initialEMAs?: Record<string, Record<string, LiveEMAs>>) {
+export function useBinanceWebSocket(watchlist: string[] = []) {
   const [prices, setPrices] = useState<Record<string, LiveTickerData>>({});
   const [state, setState] = useState<WebSocketState>({
     connected: false,
     lastUpdate: 0,
     error: null,
   });
+  
+  // Build tracked symbols set from watchlist
+  const trackedSymbols = useMemo(() => {
+    return new Set(watchlist.map(s => `${s}USDT`));
+  }, [watchlist]);
   
   // Store EMAs that get updated with each tick
   const emasRef = useRef<Record<string, LiveEMAs>>({});
@@ -72,6 +70,7 @@ export function useBinanceWebSocket(initialEMAs?: Record<string, Record<string, 
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (trackedSymbols.size === 0) return;
 
     try {
       const ws = new WebSocket(WS_URL);
@@ -92,7 +91,7 @@ export function useBinanceWebSocket(initialEMAs?: Record<string, Record<string, 
             
             for (const ticker of data) {
               const symbol = ticker.s;
-              if (TRACKED_SYMBOLS.has(symbol)) {
+              if (trackedSymbols.has(symbol)) {
                 const baseSymbol = symbol.replace('USDT', '');
                 const newPrice = parseFloat(ticker.c);
                 
@@ -155,7 +154,7 @@ export function useBinanceWebSocket(initialEMAs?: Record<string, Record<string, 
       console.error('Failed to create WebSocket:', e);
       setState(s => ({ ...s, error: 'Failed to connect' }));
     }
-  }, []);
+  }, [trackedSymbols]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {

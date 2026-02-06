@@ -9,6 +9,7 @@ import { useBinanceWebSocket } from '@/hooks/useBinanceWebSocket';
 import { MiniCandleChart } from '@/components/MiniCandleChart';
 import { ChartModal } from '@/components/ChartModal';
 import { TradingSessions } from '@/components/TradingSessions';
+import { PairSelector, loadSavedPairs, DEFAULT_PAIRS } from '@/components/PairSelector';
 
 // ============================================
 // TYPES
@@ -297,9 +298,15 @@ export default function Dashboard() {
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir }>({ field: 'confluence', dir: 'desc' });
   const [filter, setFilter] = useState<FilterMode>('all');
   const [selectedCrypto, setSelectedCrypto] = useState<CryptoData | null>(null);
+  const [watchlist, setWatchlist] = useState<string[]>(DEFAULT_PAIRS);
+  
+  // Load saved watchlist on mount
+  useEffect(() => {
+    setWatchlist(loadSavedPairs());
+  }, []);
   
   // WebSocket for real-time prices and EMAs
-  const { prices: wsPrices, connected, lastUpdate: wsLastUpdate, initializeEMAs } = useBinanceWebSocket();
+  const { prices: wsPrices, connected, lastUpdate: wsLastUpdate, initializeEMAs } = useBinanceWebSocket(watchlist);
   
   // Initialize EMAs from API data when it loads
   useEffect(() => {
@@ -315,11 +322,13 @@ export default function Dashboard() {
   }, [data, initializeEMAs]);
   
   const fetchData = useCallback(async () => {
+    if (watchlist.length === 0) return;
+    
     try {
       setLoading(true);
       setError(null);
       
-      const res = await fetch('/api/market');
+      const res = await fetch(`/api/market?symbols=${watchlist.join(',')}`);
       const json = await res.json();
       
       if (!json.success) throw new Error(json.error);
@@ -331,13 +340,13 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [watchlist]);
   
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [fetchData, watchlist]);
   
   // Merge API data with live WebSocket prices and EMAs
   const mergedData = useMemo(() => {
@@ -525,6 +534,19 @@ export default function Dashboard() {
       {/* Trading Sessions Bar */}
       <div className="max-w-[2400px] mx-auto px-4 pt-4">
         <TradingSessions />
+      </div>
+      
+      {/* Watchlist Selector */}
+      <div className="max-w-[2400px] mx-auto px-4 pt-4">
+        <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Watchlist</span>
+          </div>
+          <PairSelector 
+            selectedPairs={watchlist} 
+            onPairsChange={setWatchlist} 
+          />
+        </div>
       </div>
       
       {/* Filters Bar */}
