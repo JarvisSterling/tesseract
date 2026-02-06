@@ -297,6 +297,16 @@ async function analyzeSymbol(
   let volume1h = { current: 0, average: 0, ratio: 1 };
   let atr1h: number | null = null;
   let macd1h: MACDResult | null = null;
+  
+  // 4h data for multi-timeframe confirmation
+  let rsi4h: number | null = null;
+  let rsiSeries4h: number[] = [];
+  let candles4h: OHLCVData[] = [];
+  let emaSeries4h: Record<number, number[]> = {};
+  let emaSlopes4h: Record<number, number | null> = {};
+  let volume4h = { current: 0, average: 0, ratio: 1 };
+  let atr4h: number | null = null;
+  let macd4h: MACDResult | null = null;
 
   // Fetch all timeframes in parallel
   const klinesPromises = TIMEFRAMES.map(async (tf) => {
@@ -377,6 +387,36 @@ async function analyzeSymbol(
       // MACD for momentum confirmation
       macd1h = calcMACD(closePrices, 12, 26, 9);
     }
+    
+    // Store 4h data for multi-timeframe confirmation
+    if (tf.label === '4h') {
+      rsi4h = calcRSI(closePrices);
+      rsiSeries4h = calcRSISeries(closePrices);
+      emaSeries4h = series;
+      emaSlopes4h = slopes;
+      
+      // Build OHLCV candles for strategies
+      candles4h = klines.map((k: any) => ({
+        open: parseFloat(k[1]),
+        high: parseFloat(k[2]),
+        low: parseFloat(k[3]),
+        close: parseFloat(k[4]),
+        volume: parseFloat(k[5]),
+        timestamp: k[0],
+      }));
+      
+      // Volume analysis
+      const avgVol = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+      volume4h = {
+        current: volumes[volumes.length - 1] || 0,
+        average: avgVol,
+        ratio: avgVol > 0 ? (volumes[volumes.length - 1] || 0) / avgVol : 1,
+      };
+      
+      // ATR and MACD
+      atr4h = calcATR(candles4h, 14);
+      macd4h = calcMACD(closePrices, 12, 26, 9);
+    }
   }
 
   // Calculate confluence
@@ -386,12 +426,13 @@ async function analyzeSymbol(
   const signalData = generateSignal(confluence, rsi1h, slope21_1h, priceVsEma21_1h);
 
   // ============================================
-  // RUN STRATEGY ENGINE
+  // RUN STRATEGY ENGINE (Multi-Timeframe)
   // ============================================
   let strategies: StrategyResult[] = [];
   
   if (candles1h.length > 50) {
-    const strategyInput: StrategyInput = {
+    // Run strategies on 1h
+    const input1h: StrategyInput = {
       symbol: baseSymbol,
       price,
       candles: candles1h,
@@ -410,8 +451,105 @@ async function analyzeSymbol(
       },
     };
     
-    const engineResult = evaluateStrategies(strategyInput, { minStrength: 20 });
-    strategies = engineResult.strategies;
+    const result1h = evaluateStrategies(input1h, { minStrength: 20 });
+    
+    // Run strategies on 4h for confirmation
+    let result4h: { strategies: StrategyResult[] } | null = null;
+    if (candles4h.length > 50) {
+      const input4h: StrategyInput = {
+        symbol: baseSymbol,
+        price,
+        candles: candles4h,
+        timeframe: '4h',
+        indicators: {
+          emas: {
+            values: tfData['4h']?.emas || {},
+            series: emaSeries4h,
+            slopes: emaSlopes4h,
+          },
+          rsi: rsi4h,
+          macd: macd4h,
+          atr: atr4h,
+          rsiSeries: rsiSeries4h,
+          volume: volume4h,
+        },
+      };
+      result4h = evaluateStrategies(input4h, { minStrength: 20 });
+    }
+    
+    // Multi-timeframe confirmation logic
+    strategies = result1h.strategies.map(strat1h => {
+      // Find matching strategy in 4h results
+      const strat4h = result4h?.strategies.find(s => s.id === strat1h.id);
+      
+      if (!strat4h) {
+        // No 4h data - mark as unconfirmed but still show
+        return {
+          ...strat1h,
+          signal: {
+            ...strat1h.signal,
+            reasons: [...strat1h.signal.reasons, '⚠️ 4h data unavailable'],
+          },
+        };
+      }
+      
+      // Check if directions agree
+      const dir1h = strat1h.signal.type.includes('LONG') ? 'long' : 
+                    strat1h.signal.type.includes('SHORT') ? 'short' : 'neutral';
+      const dir4h = strat4h.signal.type.includes('LONG') ? 'long' : 
+                    strat4h.signal.type.includes('SHORT') ? 'short' : 'neutral';
+      
+      // Both agree on direction = CONFIRMED (boost strength)
+      if (dir1h === dir4h && dir1h !== 'neutral') {
+        const boostedStrength = Math.min(strat1h.signal.strength + 15, 100);
+        const isStrong = boostedStrength >= 75;
+        
+        return {
+          ...strat1h,
+          signal: {
+            ...strat1h.signal,
+            type: dir1h === 'long' 
+              ? (isStrong ? 'STRONG_LONG' : 'LONG')
+              : (isStrong ? 'STRONG_SHORT' : 'SHORT') as any,
+            strength: boostedStrength,
+            reasons: [
+              '✅ 4h CONFIRMS ' + dir1h.toUpperCase(),
+              ...strat1h.signal.reasons,
+            ],
+          },
+        };
+      }
+      
+      // Disagreement = reduce confidence or neutralize
+      if (dir1h !== 'neutral' && dir4h !== 'neutral' && dir1h !== dir4h) {
+        return {
+          ...strat1h,
+          signal: {
+            type: 'NEUTRAL' as any,
+            strength: 0,
+            reasons: ['❌ 1h/4h CONFLICT: 1h=' + dir1h + ', 4h=' + dir4h],
+          },
+        };
+      }
+      
+      // 4h neutral but 1h has signal - reduce confidence
+      if (dir1h !== 'neutral' && dir4h === 'neutral') {
+        const reducedStrength = Math.max(strat1h.signal.strength - 20, 0);
+        return {
+          ...strat1h,
+          signal: {
+            ...strat1h.signal,
+            strength: reducedStrength,
+            reasons: [
+              '⚠️ 4h NEUTRAL (no confirmation)',
+              ...strat1h.signal.reasons,
+            ],
+          },
+        };
+      }
+      
+      return strat1h;
+    });
   }
 
   return {
