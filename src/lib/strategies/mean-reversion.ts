@@ -30,8 +30,8 @@ function analyzeDeviation(price: number, ema21: number | null): DeviationAnalysi
   }
   
   const deviation = ((price - ema21) / ema21) * 100;
-  // INCREASED: Threshold from 1.5% to 3% - only trigger on real extensions
-  const threshold = 3.0;
+  // V3: Threshold adjusted to 2.5% (was 3% - too strict, was 1.5% - too loose)
+  const threshold = 2.5;
   
   if (deviation > threshold) {
     return {
@@ -286,7 +286,7 @@ export const meanReversion: Strategy = {
     score += Math.min(deviation.extensionStrength * 8, 25); // Extension
     score += pattern.strength * 0.4; // Pattern (max ~36 pts)
     
-    // RSI confirmation (STRICTER: <25 or >75)
+    // RSI confirmation (V3: slightly more lenient scoring)
     if (rsi !== null) {
       if (deviation.direction === 'oversold' && rsi < 25) {
         score += 25;
@@ -295,16 +295,19 @@ export const meanReversion: Strategy = {
         score += 25;
         reasons.push(`RSI extreme overbought (${rsi.toFixed(0)})`);
       } else if (deviation.direction === 'oversold' && rsi < 35) {
-        score += 12;
+        score += 15;
         reasons.push(`RSI oversold (${rsi.toFixed(0)})`);
       } else if (deviation.direction === 'overbought' && rsi > 65) {
-        score += 12;
+        score += 15;
         reasons.push(`RSI overbought (${rsi.toFixed(0)})`);
-      } else {
-        // RSI not confirming - reduce score
-        score -= 10;
-        reasons.push(`⚠️ RSI not extreme (${rsi.toFixed(0)})`);
+      } else if (deviation.direction === 'oversold' && rsi < 45) {
+        score += 5;
+        reasons.push(`RSI leaning oversold (${rsi.toFixed(0)})`);
+      } else if (deviation.direction === 'overbought' && rsi > 55) {
+        score += 5;
+        reasons.push(`RSI leaning overbought (${rsi.toFixed(0)})`);
       }
+      // No longer penalizing neutral RSI
     }
     
     // Volume on reversal candle
@@ -322,8 +325,8 @@ export const meanReversion: Strategy = {
       reasons.push('✓ Exhaustion pattern visible');
     }
     
-    // Minimum score threshold increased
-    if (score < 55) {
+    // V3: Minimum score threshold 50 (was 55 - slightly strict)
+    if (score < 50) {
       return {
         type: 'NEUTRAL',
         strength: Math.round(score),

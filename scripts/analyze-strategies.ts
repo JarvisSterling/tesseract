@@ -36,10 +36,14 @@ interface BacktestResult {
 }
 
 async function runBacktest(symbols: string[], days: number): Promise<BacktestResult[]> {
-  // Use deployed Vercel version
-  const res = await fetch('https://tesseract-black.vercel.app/api/backtest', {
+  // Use deployed Vercel version with cache busting
+  const timestamp = Date.now();
+  const res = await fetch(`https://tesseract-black.vercel.app/api/backtest?t=${timestamp}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache',
+    },
     body: JSON.stringify({ symbols, days }),
   });
   
