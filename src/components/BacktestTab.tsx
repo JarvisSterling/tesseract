@@ -164,7 +164,7 @@ export function BacktestTab() {
         <div className="mb-4">
           <label className="text-xs text-zinc-400 block mb-2">Backtest Period</label>
           <div className="flex gap-2">
-            {[7, 14, 30, 60, 90].map(d => (
+            {[7, 14, 30, 60, 90, 180, 365].map(d => (
               <button
                 key={d}
                 onClick={() => setDays(d)}

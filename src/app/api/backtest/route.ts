@@ -18,50 +18,85 @@ interface KlineResponse {
   11: string; // Ignore
 }
 
-async function fetchKlines(
+async function fetchKlinesBatch(
   symbol: string,
   interval: string,
   limit: number = 500
 ): Promise<Candle[]> {
-  const url = `${BINANCE_US_API}/klines?symbol=${symbol}USD&interval=${interval}&limit=${limit}`;
+  // Binance limits to 1000 per request, so paginate if needed
+  const maxPerRequest = 1000;
+  const allCandles: Candle[] = [];
   
-  const res = await fetch(url, { 
-    next: { revalidate: 300 }, // Cache for 5 mins
-    headers: { 'Accept': 'application/json' }
-  });
+  // Calculate how many requests we need
+  const requests = Math.ceil(limit / maxPerRequest);
+  const now = Date.now();
   
-  if (!res.ok) {
-    // Try USDT pair if USD fails
-    const usdtUrl = `${BINANCE_US_API}/klines?symbol=${symbol}USDT&interval=${interval}&limit=${limit}`;
-    const usdtRes = await fetch(usdtUrl, { 
-      next: { revalidate: 300 },
-      headers: { 'Accept': 'application/json' }
-    });
+  // Calculate interval in ms
+  const intervalMs: Record<string, number> = {
+    '1h': 60 * 60 * 1000,
+    '4h': 4 * 60 * 60 * 1000,
+    '1d': 24 * 60 * 60 * 1000,
+  };
+  const intMs = intervalMs[interval] || 60 * 60 * 1000;
+  
+  for (let i = 0; i < requests; i++) {
+    const batchLimit = Math.min(maxPerRequest, limit - allCandles.length);
+    const endTime = now - (allCandles.length * intMs);
+    const startTime = endTime - (batchLimit * intMs);
     
-    if (!usdtRes.ok) {
-      throw new Error(`Failed to fetch klines for ${symbol}`);
+    const url = `${BINANCE_US_API}/klines?symbol=${symbol}USD&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=${batchLimit}`;
+    
+    try {
+      const res = await fetch(url, { 
+        next: { revalidate: 300 },
+        headers: { 'Accept': 'application/json' }
+      });
+      
+      if (!res.ok) {
+        // Try USDT pair
+        const usdtUrl = `${BINANCE_US_API}/klines?symbol=${symbol}USDT&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=${batchLimit}`;
+        const usdtRes = await fetch(usdtUrl, { 
+          next: { revalidate: 300 },
+          headers: { 'Accept': 'application/json' }
+        });
+        
+        if (!usdtRes.ok) continue;
+        
+        const data: KlineResponse[] = await usdtRes.json();
+        const candles = data.map(k => ({
+          time: k[0],
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+        }));
+        allCandles.unshift(...candles);
+      } else {
+        const data: KlineResponse[] = await res.json();
+        const candles = data.map(k => ({
+          time: k[0],
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+        }));
+        allCandles.unshift(...candles);
+      }
+    } catch (e) {
+      console.error(`Failed to fetch batch ${i} for ${symbol}:`, e);
     }
-    
-    const data: KlineResponse[] = await usdtRes.json();
-    return data.map(k => ({
-      time: k[0],
-      open: parseFloat(k[1]),
-      high: parseFloat(k[2]),
-      low: parseFloat(k[3]),
-      close: parseFloat(k[4]),
-      volume: parseFloat(k[5]),
-    }));
   }
   
-  const data: KlineResponse[] = await res.json();
-  return data.map(k => ({
-    time: k[0],
-    open: parseFloat(k[1]),
-    high: parseFloat(k[2]),
-    low: parseFloat(k[3]),
-    close: parseFloat(k[4]),
-    volume: parseFloat(k[5]),
-  }));
+  // Sort by time and deduplicate
+  allCandles.sort((a, b) => a.time - b.time);
+  const seen = new Set<number>();
+  return allCandles.filter(c => {
+    if (seen.has(c.time)) return false;
+    seen.add(c.time);
+    return true;
+  });
 }
 
 export async function GET(request: NextRequest) {
@@ -73,13 +108,13 @@ export async function GET(request: NextRequest) {
     // Calculate how many candles we need
     // 1h candles: 24 per day
     // 4h candles: 6 per day
-    const candles1hLimit = Math.min(days * 24 + 200, 1000); // +200 for warmup, max 1000
-    const candles4hLimit = Math.min(days * 6 + 50, 500);
+    const candles1hLimit = days * 24 + 200; // +200 for warmup
+    const candles4hLimit = days * 6 + 50;
     
-    // Fetch historical data
+    // Fetch historical data (with pagination for large requests)
     const [candles1h, candles4h] = await Promise.all([
-      fetchKlines(symbol, '1h', candles1hLimit),
-      fetchKlines(symbol, '4h', candles4hLimit),
+      fetchKlinesBatch(symbol, '1h', candles1hLimit),
+      fetchKlinesBatch(symbol, '4h', candles4hLimit),
     ]);
     
     if (candles1h.length < 250) {
@@ -121,12 +156,12 @@ export async function POST(request: NextRequest) {
     
     for (const symbol of symbols.slice(0, 5)) { // Max 5 symbols
       try {
-        const candles1hLimit = Math.min(days * 24 + 200, 1000);
-        const candles4hLimit = Math.min(days * 6 + 50, 500);
+        const candles1hLimit = days * 24 + 200;
+        const candles4hLimit = days * 6 + 50;
         
         const [candles1h, candles4h] = await Promise.all([
-          fetchKlines(symbol, '1h', candles1hLimit),
-          fetchKlines(symbol, '4h', candles4hLimit),
+          fetchKlinesBatch(symbol, '1h', candles1hLimit),
+          fetchKlinesBatch(symbol, '4h', candles4hLimit),
         ]);
         
         if (candles1h.length >= 250) {
