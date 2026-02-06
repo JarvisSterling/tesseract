@@ -451,7 +451,7 @@ async function analyzeSymbol(
       },
     };
     
-    const result1h = evaluateStrategies(input1h, { minStrength: 20 });
+    const result1h = evaluateStrategies(input1h, { minStrength: 0 }); // Return all strategies
     
     // Run strategies on 4h for confirmation
     let result4h: { strategies: StrategyResult[] } | null = null;
@@ -474,7 +474,7 @@ async function analyzeSymbol(
           volume: volume4h,
         },
       };
-      result4h = evaluateStrategies(input4h, { minStrength: 20 });
+      result4h = evaluateStrategies(input4h, { minStrength: 0 }); // Return all for comparison
     }
     
     // Multi-timeframe confirmation logic
