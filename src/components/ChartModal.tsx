@@ -2,13 +2,30 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createChart, ColorType, IChartApi, AreaSeries } from 'lightweight-charts';
-import { X, ExternalLink, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { X, ExternalLink, TrendingUp, TrendingDown, Minus, Target, Zap, BarChart3, GitBranch } from 'lucide-react';
+import { StrategySignals } from './StrategySignals';
 
 interface TimeframeData {
   stack: 'bull' | 'bear' | 'mixed';
   priceVsEma: Record<number, number | null>;
   trend: string;
   emas?: Record<number, number | null>;
+}
+
+interface StrategySignal {
+  type: 'STRONG_LONG' | 'LONG' | 'NEUTRAL' | 'SHORT' | 'STRONG_SHORT';
+  strength: number;
+  entry?: number;
+  stop?: number;
+  target?: number;
+  reasons: string[];
+}
+
+interface StrategyResult {
+  id: string;
+  name: string;
+  category: 'swing' | 'scalp' | 'breakout' | 'reversal';
+  signal: StrategySignal;
 }
 
 interface ChartModalProps {
@@ -22,6 +39,7 @@ interface ChartModalProps {
     tradeSignal: { signal: string; confidence: number; reasons: string[] };
     rsi: Record<string, number | null>;
     timeframes: Record<string, TimeframeData>;
+    strategies?: StrategyResult[];
   };
   livePrice?: number;
   liveChange?: number;
@@ -331,6 +349,13 @@ export function ChartModal({ crypto, livePrice, liveChange, onClose }: ChartModa
                 </span>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Strategy Signals */}
+        {crypto.strategies && crypto.strategies.length > 0 && (
+          <div className="px-4 pb-4">
+            <StrategySignals strategies={crypto.strategies} />
           </div>
         )}
       </div>

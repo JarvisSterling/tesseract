@@ -10,10 +10,27 @@ import { MiniCandleChart } from '@/components/MiniCandleChart';
 import { ChartModal } from '@/components/ChartModal';
 import { TradingSessions } from '@/components/TradingSessions';
 import { PairSelector, loadSavedPairs, DEFAULT_PAIRS } from '@/components/PairSelector';
+import { StrategyBadges } from '@/components/StrategySignals';
 
 // ============================================
 // TYPES
 // ============================================
+
+interface StrategySignal {
+  type: 'STRONG_LONG' | 'LONG' | 'NEUTRAL' | 'SHORT' | 'STRONG_SHORT';
+  strength: number;
+  entry?: number;
+  stop?: number;
+  target?: number;
+  reasons: string[];
+}
+
+interface StrategyResult {
+  id: string;
+  name: string;
+  category: 'swing' | 'scalp' | 'breakout' | 'reversal';
+  signal: StrategySignal;
+}
 
 interface TimeframeData {
   stack: 'bull' | 'bear' | 'mixed';
@@ -32,12 +49,13 @@ interface CryptoData {
   tradeSignal: { signal: string; confidence: number; reasons: string[] };
   rsi: Record<string, number | null>;
   recentPrices: number[];
+  strategies: StrategyResult[];
   livePrice?: number;
   liveChange24h?: number;
   liveEMAs?: Record<number, number>;
 }
 
-type SortField = 'symbol' | 'price' | 'change' | 'signal' | 'confluence' | 'rsi';
+type SortField = 'symbol' | 'price' | 'change' | 'signal' | 'confluence' | 'rsi' | 'strategies';
 type SortDir = 'asc' | 'desc';
 type FilterMode = 'all' | 'long' | 'short' | 'strong';
 
@@ -418,6 +436,13 @@ export default function Dashboard() {
           aVal = a.rsi['1h'] ?? 50;
           bVal = b.rsi['1h'] ?? 50;
           break;
+        case 'strategies':
+          // Sort by number of active strategy signals
+          const aActive = (a.strategies || []).filter(s => s.signal.type !== 'NEUTRAL').length;
+          const bActive = (b.strategies || []).filter(s => s.signal.type !== 'NEUTRAL').length;
+          aVal = aActive;
+          bVal = bActive;
+          break;
         default:
           return 0;
       }
@@ -633,6 +658,9 @@ export default function Dashboard() {
                     <th className="text-center py-2 px-2">
                       <SortHeader label="Confluence" field="confluence" currentSort={sort} onSort={handleSort} />
                     </th>
+                    <th className="text-center py-2 px-2">
+                      <SortHeader label="Strategies" field="strategies" currentSort={sort} onSort={handleSort} />
+                    </th>
                     {visibleTFs.map(tf => (
                       <th key={tf} className="text-center py-2 px-2 border-l border-zinc-800/30" colSpan={EMA_PERIODS.length + 1}>
                         <span className="text-[10px] text-zinc-400 font-semibold">{tf}</span>
@@ -640,7 +668,7 @@ export default function Dashboard() {
                     ))}
                   </tr>
                   <tr className="border-b border-zinc-800/30 bg-zinc-900/50">
-                    <th colSpan={7}></th>
+                    <th colSpan={8}></th>
                     {visibleTFs.map(tf => (
                       <th key={`${tf}-sub`} className="contents">
                         {EMA_PERIODS.map(period => (
@@ -758,6 +786,11 @@ export default function Dashboard() {
                               />
                             </div>
                           </div>
+                        </td>
+                        
+                        {/* Strategies */}
+                        <td className="py-2 px-2 text-center">
+                          <StrategyBadges strategies={crypto.strategies || []} />
                         </td>
                         
                         {/* Timeframes - Live Updated */}

@@ -4,6 +4,13 @@
  */
 
 import { NextResponse } from 'next/server';
+import { 
+  evaluateStrategies, 
+  StrategyInput, 
+  OHLCVData,
+  IndicatorData,
+  StrategyResult 
+} from '@/lib/strategies';
 
 // ============================================
 // CONFIGURATION
@@ -209,9 +216,14 @@ async function analyzeSymbol(
   const usdSymbol = `${baseSymbol}USD`; // Binance.US uses USD pairs
   const tfData: Record<string, any> = {};
   let rsi1h: number | null = null;
+  let rsiSeries1h: number[] = [];
   let slope21_1h: number | null = null;
   let priceVsEma21_1h: number | null = null;
   let recentPrices: number[] = [];
+  let candles1h: OHLCVData[] = [];
+  let emaSeries1h: Record<number, number[]> = {};
+  let emaSlopes1h: Record<number, number | null> = {};
+  let volume1h = { current: 0, average: 0, ratio: 1 };
 
   // Fetch all timeframes in parallel
   const klinesPromises = TIMEFRAMES.map(async (tf) => {
@@ -231,15 +243,21 @@ async function analyzeSymbol(
     if (!klines || !Array.isArray(klines) || klines.length < 50) continue;
 
     const closePrices = klines.map((k: any) => parseFloat(k[4]));
+    const volumes = klines.map((k: any) => parseFloat(k[5]));
     
     // Calculate EMAs
     const emas: Record<number, number | null> = {};
     const priceVsEma: Record<number, number | null> = {};
+    const series: Record<number, number[]> = {};
+    const slopes: Record<number, number | null> = {};
     
     for (const period of EMA_PERIODS) {
       const ema = calcEMA(closePrices, period);
+      const emaSer = calcEMASeries(closePrices, period);
       emas[period] = ema;
+      series[period] = emaSer;
       priceVsEma[period] = ema ? ((price - ema) / ema) * 100 : null;
+      slopes[period] = calcSlope(emaSer);
     }
 
     const stack = detectStack(emas);
@@ -249,23 +267,72 @@ async function analyzeSymbol(
       ? (price > ema50 && price > ema200 ? 'bullish' : price < ema50 && price < ema200 ? 'bearish' : 'neutral')
       : 'neutral';
 
-    tfData[tf.label] = { emas, priceVsEma, stack, trend };
+    tfData[tf.label] = { emas, priceVsEma, stack, trend, series, slopes };
 
-    // Store 1h data for signal generation
+    // Store 1h data for signal generation and strategies
     if (tf.label === '1h') {
       rsi1h = calcRSI(closePrices);
+      rsiSeries1h = calcRSISeries(closePrices);
       const ema21Series = calcEMASeries(closePrices, 21);
       slope21_1h = calcSlope(ema21Series);
       priceVsEma21_1h = priceVsEma[21];
       recentPrices = closePrices.slice(-50);
+      emaSeries1h = series;
+      emaSlopes1h = slopes;
+      
+      // Build OHLCV candles for strategies
+      candles1h = klines.map((k: any) => ({
+        open: parseFloat(k[1]),
+        high: parseFloat(k[2]),
+        low: parseFloat(k[3]),
+        close: parseFloat(k[4]),
+        volume: parseFloat(k[5]),
+        timestamp: k[0],
+      }));
+      
+      // Volume analysis
+      const avgVol = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+      volume1h = {
+        current: volumes[volumes.length - 1] || 0,
+        average: avgVol,
+        ratio: avgVol > 0 ? (volumes[volumes.length - 1] || 0) / avgVol : 1,
+      };
     }
   }
 
   // Calculate confluence
   const confluence = calcConfluence(tfData);
 
-  // Generate signal
+  // Generate legacy signal
   const signalData = generateSignal(confluence, rsi1h, slope21_1h, priceVsEma21_1h);
+
+  // ============================================
+  // RUN STRATEGY ENGINE
+  // ============================================
+  let strategies: StrategyResult[] = [];
+  
+  if (candles1h.length > 50) {
+    const strategyInput: StrategyInput = {
+      symbol: baseSymbol,
+      price,
+      candles: candles1h,
+      timeframe: '1h',
+      indicators: {
+        emas: {
+          values: tfData['1h']?.emas || {},
+          series: emaSeries1h,
+          slopes: emaSlopes1h,
+        },
+        rsi: rsi1h,
+        rsiSeries: rsiSeries1h,
+        atr: null, // TODO: Add ATR calculation
+        volume: volume1h,
+      },
+    };
+    
+    const engineResult = evaluateStrategies(strategyInput, { minStrength: 20 });
+    strategies = engineResult.strategies;
+  }
 
   return {
     symbol: baseSymbol,
@@ -280,7 +347,39 @@ async function analyzeSymbol(
     tradeSignal: signalData,
     rsi: { '1h': rsi1h },
     recentPrices,
+    strategies, // NEW: Strategy signals
   };
+}
+
+// Calculate RSI series for divergence detection
+function calcRSISeries(prices: number[], period = 14): number[] {
+  const series: number[] = [];
+  if (prices.length < period + 1) return series;
+  
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
+    const change = prices[i] - prices[i - 1];
+    if (change > 0) avgGain += change;
+    else avgLoss -= change;
+  }
+  avgGain /= period;
+  avgLoss /= period;
+  
+  series.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
+  
+  for (let i = period + 1; i < prices.length; i++) {
+    const change = prices[i] - prices[i - 1];
+    if (change > 0) {
+      avgGain = (avgGain * (period - 1) + change) / period;
+      avgLoss = (avgLoss * (period - 1)) / period;
+    } else {
+      avgGain = (avgGain * (period - 1)) / period;
+      avgLoss = (avgLoss * (period - 1) - change) / period;
+    }
+    series.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
+  }
+  
+  return series;
 }
 
 // ============================================
