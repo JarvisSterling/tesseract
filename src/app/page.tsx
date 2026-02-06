@@ -17,11 +17,13 @@ import { StatsTab } from '@/components/StatsTab';
 import { 
   TrackedSignal, 
   loadSignals, 
-  saveSignals, 
   addSignal, 
   checkSignalOutcomes,
-  clearAllSignals 
-} from '@/lib/signalTracker';
+  clearAllSignals,
+  isSignalProcessed,
+  markSignalProcessed,
+  cleanupExpiredSignals
+} from '@/lib/signalTrackerDB';
 
 // ============================================
 // TYPES
@@ -345,9 +347,11 @@ export default function Dashboard() {
   const [trackedSignals, setTrackedSignals] = useState<TrackedSignal[]>([]);
   const processedSignalsRef = useRef<Set<string>>(new Set());
   
-  // Load tracked signals on mount
+  // Load tracked signals from database on mount
   useEffect(() => {
-    setTrackedSignals(loadSignals());
+    loadSignals().then(signals => setTrackedSignals(signals));
+    // Cleanup expired processed signals periodically
+    cleanupExpiredSignals();
   }, []);
   
   // Sound alert for new signals
@@ -362,23 +366,7 @@ export default function Dashboard() {
   // Track previous signal count for alert detection
   const prevSignalCountRef = useRef(0);
   
-  // Load processed signals from localStorage to prevent re-tracking on refresh
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('tesseract-processed-signals');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          // Only load entries that are less than 30 minutes old
-          const now = Date.now();
-          const validEntries = Object.entries(parsed).filter(
-            ([_, timestamp]) => now - (timestamp as number) < 30 * 60 * 1000
-          );
-          validEntries.forEach(([key]) => processedSignalsRef.current.add(key));
-        }
-      } catch {}
-    }
-  }, []);
+  // processedSignalsRef is now just a local cache - DB is source of truth
   
   // WebSocket for real-time prices and EMAs
   const { prices: wsPrices, connected, lastUpdate: wsLastUpdate, initializeEMAs } = useBinanceWebSocket(watchlist);
@@ -451,101 +439,101 @@ export default function Dashboard() {
     });
   }, [data, wsPrices]);
   
-  // Track new signals from strategies
+  // Track new signals from strategies (database-backed)
   useEffect(() => {
     if (data.length === 0) return;
     
-    for (const crypto of data) {
-      if (!crypto.strategies) continue;
-      
-      for (const strategy of crypto.strategies) {
-        // Only track non-neutral signals with entry/stop/target
-        if (strategy.signal.type === 'NEUTRAL') continue;
-        if (!strategy.signal.entry || !strategy.signal.stop || !strategy.signal.target) continue;
+    const processSignals = async () => {
+      for (const crypto of data) {
+        if (!crypto.strategies) continue;
         
-        // Create unique key for this signal
-        const signalKey = `${crypto.symbol}-${strategy.id}-${strategy.signal.type}`;
-        
-        // Skip if already processed recently (within last 5 mins)
-        if (processedSignalsRef.current.has(signalKey)) continue;
-        
-        // Add to processed set (expires after 30 mins to allow new signals)
-        processedSignalsRef.current.add(signalKey);
-        
-        // Save to localStorage for persistence across refreshes
-        try {
-          const saved = localStorage.getItem('tesseract-processed-signals');
-          const processed = saved ? JSON.parse(saved) : {};
-          processed[signalKey] = Date.now();
-          // Clean old entries (> 30 mins)
-          const now = Date.now();
-          const cleaned = Object.fromEntries(
-            Object.entries(processed).filter(([_, ts]) => now - (ts as number) < 30 * 60 * 1000)
-          );
-          localStorage.setItem('tesseract-processed-signals', JSON.stringify(cleaned));
-        } catch {}
-        
-        // Also set a timer to remove from memory after 30 mins
-        setTimeout(() => {
-          processedSignalsRef.current.delete(signalKey);
-        }, 30 * 60 * 1000);
-        
-        // Track the signal
-        const newSignal = addSignal({
-          symbol: crypto.symbol,
-          strategyId: strategy.id,
-          strategyName: strategy.name,
-          type: strategy.signal.type as TrackedSignal['type'],
-          entry: strategy.signal.entry,
-          stop: strategy.signal.stop,
-          target: strategy.signal.target,
-          strength: strategy.signal.strength,
-          reasons: strategy.signal.reasons,
-        });
-        
-        setTrackedSignals(prev => {
-          // Check if already exists
-          if (prev.some(s => s.id === newSignal.id)) return prev;
-          // Play alert sound for new signal
-          playAlertSound();
-          return [...prev, newSignal];
-        });
+        for (const strategy of crypto.strategies) {
+          // Only track non-neutral signals with entry/stop/target
+          if (strategy.signal.type === 'NEUTRAL') continue;
+          if (!strategy.signal.entry || !strategy.signal.stop || !strategy.signal.target) continue;
+          
+          // Create unique key for this signal
+          const signalKey = `${crypto.symbol}-${strategy.id}-${strategy.signal.type}`;
+          
+          // Skip if already in local cache (quick check)
+          if (processedSignalsRef.current.has(signalKey)) continue;
+          
+          // Check database for deduplication
+          const alreadyProcessed = await isSignalProcessed(signalKey);
+          if (alreadyProcessed) {
+            processedSignalsRef.current.add(signalKey); // Cache locally
+            continue;
+          }
+          
+          // Mark as processed in database (30 min expiry)
+          await markSignalProcessed(signalKey, 30);
+          processedSignalsRef.current.add(signalKey);
+          
+          // Track the signal in database
+          const newSignal = await addSignal({
+            symbol: crypto.symbol,
+            strategyId: strategy.id,
+            strategyName: strategy.name,
+            type: strategy.signal.type as TrackedSignal['type'],
+            entry: strategy.signal.entry,
+            stop: strategy.signal.stop,
+            target: strategy.signal.target,
+            strength: strategy.signal.strength,
+            reasons: strategy.signal.reasons,
+          });
+          
+          if (newSignal) {
+            setTrackedSignals(prev => {
+              // Check if already exists
+              if (prev.some(s => s.id === newSignal.id)) return prev;
+              // Play alert sound for new signal
+              playAlertSound();
+              return [...prev, newSignal];
+            });
+          }
+        }
       }
-    }
-  }, [data]);
+    };
+    
+    processSignals();
+  }, [data, playAlertSound]);
   
-  // Check signal outcomes with live prices
+  // Check signal outcomes with live prices (database-backed)
   useEffect(() => {
     if (trackedSignals.length === 0 || Object.keys(wsPrices).length === 0) return;
     
-    // Build price map
-    const priceMap: Record<string, number> = {};
-    for (const [symbol, data] of Object.entries(wsPrices)) {
-      priceMap[symbol] = data.price;
-    }
-    
-    // Also add API prices for assets without live data
-    for (const crypto of mergedData) {
-      if (!priceMap[crypto.symbol]) {
-        priceMap[crypto.symbol] = crypto.price;
+    const checkOutcomes = async () => {
+      // Build price map
+      const priceMap: Record<string, number> = {};
+      for (const [symbol, wsData] of Object.entries(wsPrices)) {
+        priceMap[symbol] = wsData.price;
       }
-    }
+      
+      // Also add API prices for assets without live data
+      for (const crypto of mergedData) {
+        if (!priceMap[crypto.symbol]) {
+          priceMap[crypto.symbol] = crypto.price;
+        }
+      }
+      
+      const updatedSignals = await checkSignalOutcomes(trackedSignals, priceMap);
+      
+      // Only update if something changed
+      const hasChanges = updatedSignals.some((s, i) => 
+        s.status !== trackedSignals[i]?.status
+      );
+      
+      if (hasChanges) {
+        setTrackedSignals(updatedSignals);
+      }
+    };
     
-    const updatedSignals = checkSignalOutcomes(trackedSignals, priceMap);
-    
-    // Only update if something changed
-    const hasChanges = updatedSignals.some((s, i) => 
-      s.status !== trackedSignals[i]?.status
-    );
-    
-    if (hasChanges) {
-      setTrackedSignals(updatedSignals);
-    }
+    checkOutcomes();
   }, [trackedSignals, wsPrices, mergedData]);
   
-  // Handle clear signals
-  const handleClearSignals = useCallback(() => {
-    clearAllSignals();
+  // Handle clear signals (database-backed)
+  const handleClearSignals = useCallback(async () => {
+    await clearAllSignals();
     setTrackedSignals([]);
     processedSignalsRef.current.clear();
   }, []);
