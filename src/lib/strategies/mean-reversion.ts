@@ -36,7 +36,7 @@ function analyzeDeviation(price: number, ema21: number | null): DeviationAnalysi
   }
   
   const deviation = ((price - ema21) / ema21) * 100;
-  const threshold = 2.5; // 2.5% deviation is significant
+  const threshold = 1.5; // 1.5% deviation triggers signal (crypto is volatile)
   
   if (deviation > threshold) {
     return {
@@ -131,20 +131,15 @@ function detectReversalPattern(candles: OHLCVData[], expectedDirection: 'bullish
 }
 
 function isTrending(emas: { values: Record<number, number | null>; slopes: Record<number, number | null> }): boolean {
-  // If EMAs are strongly stacked, it's trending - mean reversion is risky
-  const ema21 = emas.values[21];
-  const ema50 = emas.values[50];
-  const ema200 = emas.values[200];
+  // Only avoid VERY strong trends where mean reversion is dangerous
   const slope21 = emas.slopes[21];
+  const slope50 = emas.slopes[50];
   
-  if (!ema21 || !ema50 || !ema200) return false;
+  // Very steep slope on both EMAs = strong trend, avoid
+  const steepSlope21 = slope21 !== null && Math.abs(slope21) > 2;
+  const steepSlope50 = slope50 !== null && Math.abs(slope50) > 1.5;
   
-  // Strong trend: perfect stack + steep slope
-  const perfectBullStack = ema21 > ema50 && ema50 > ema200;
-  const perfectBearStack = ema21 < ema50 && ema50 < ema200;
-  const steepSlope = slope21 !== null && Math.abs(slope21) > 1;
-  
-  return (perfectBullStack || perfectBearStack) && steepSlope;
+  return steepSlope21 && steepSlope50;
 }
 
 export const meanReversion: Strategy = {
@@ -186,17 +181,14 @@ export const meanReversion: Strategy = {
     // Base score for extension
     score += Math.min(deviation.extensionStrength * 10, 30);
     
-    // Pattern confirmation is crucial
+    // Pattern confirmation increases confidence
     if (pattern.isReversal && pattern.type === expectedDirection) {
       score += pattern.strength * 0.5;
-      reasons.push(`${pattern.pattern} detected`);
+      reasons.push(`✓ ${pattern.pattern} detected`);
     } else {
-      // No pattern = wait
-      return {
-        type: 'NEUTRAL',
-        strength: Math.round(score * 0.3),
-        reasons: [...reasons, '⏳ Waiting for reversal candle pattern'],
-      };
+      // No perfect pattern but still extended - give partial score
+      score += 15;
+      reasons.push('⏳ Extended - watching for reversal confirmation');
     }
     
     // RSI confirmation
