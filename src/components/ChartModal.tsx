@@ -145,7 +145,7 @@ export function ChartModal({ crypto, livePrice, liveChange, onClose }: ChartModa
       if (chartContainerRef.current) {
         chart.applyOptions({
           width: chartContainerRef.current.clientWidth,
-          height: 400,
+          height: 300,
         });
       }
     };
@@ -208,11 +208,11 @@ export function ChartModal({ crypto, livePrice, liveChange, onClose }: ChartModa
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto"
       onClick={onClose}
     >
       <div 
-        className="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden"
+        className="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-4xl my-4 max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -262,7 +262,7 @@ export function ChartModal({ crypto, livePrice, liveChange, onClose }: ChartModa
         </div>
 
         {/* Chart */}
-        <div ref={chartContainerRef} className="w-full h-[400px]" />
+        <div ref={chartContainerRef} className="w-full h-[300px]" />
 
         {/* Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 border-t border-zinc-800">

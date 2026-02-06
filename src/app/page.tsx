@@ -865,8 +865,15 @@ export default function Dashboard() {
                           </div>
                         </td>
                         
-                        {/* Mini Chart */}
-                        <td className="py-1 px-2">
+                        {/* Mini Chart - Click to open modal */}
+                        <td 
+                          className="py-1 px-2 cursor-pointer hover:bg-zinc-700/30 rounded transition-all"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedCrypto(crypto);
+                          }}
+                          title="Click to view chart"
+                        >
                           {crypto.recentPrices.length > 5 && (
                             <MiniCandleChart data={crypto.recentPrices} width={80} height={28} />
                           )}
