@@ -59,8 +59,26 @@ Patterns: Engulfing, Hammer, Star only
 - Higher win rate (stricter filters)
 - Better expectancy (only extreme setups)
 
-### After (Pending Re-test)
-- TBD
+### After V5 (FIXED!) ✅
+| Metric | V1 | V5 | Change |
+|--------|-----|-----|--------|
+| Trades | 185 | 119 | -36% |
+| Win Rate | 24.3% | 32.8% | +8.5% |
+| P&L | -45.33% | **+12.01%** | +57% |
+| Profit Factor | 0.78 | 1.13 | +0.35 |
+| Max Consec Losses | 14 | 7 | -50% |
+
+**V5 Config (working):**
+```
+Deviation Threshold: 2.0%
+RSI Scoring: <20: +35, <30: +25, <40: +15
+Momentum Filter: slope9 > 1.5% blocks signal
+Min Score: 40
+EMA Support: bonus (not gate)
+Pattern: bonus (not gate)
+```
+
+**Key Insight:** Simplicity wins. V2-V4 were overengineered with too many gates.
 
 ---
 
