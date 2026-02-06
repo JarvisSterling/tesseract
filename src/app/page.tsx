@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   RefreshCw, Volume2, VolumeX, ExternalLink, TrendingUp, TrendingDown, 
-  Wifi, WifiOff, ArrowUpDown, Filter, ChevronUp, ChevronDown
+  Wifi, WifiOff, ArrowUpDown, Filter, ChevronUp, ChevronDown, BarChart3
 } from 'lucide-react';
 import { useBinanceWebSocket } from '@/hooks/useBinanceWebSocket';
 import { MiniCandleChart } from '@/components/MiniCandleChart';
@@ -11,6 +11,16 @@ import { ChartModal } from '@/components/ChartModal';
 import { TradingSessions } from '@/components/TradingSessions';
 import { PairSelector, loadSavedPairs, DEFAULT_PAIRS } from '@/components/PairSelector';
 import { StrategyBadges } from '@/components/StrategySignals';
+import { TabNav, TabId } from '@/components/TabNav';
+import { SignalsTab } from '@/components/SignalsTab';
+import { 
+  TrackedSignal, 
+  loadSignals, 
+  saveSignals, 
+  addSignal, 
+  checkSignalOutcomes,
+  clearAllSignals 
+} from '@/lib/signalTracker';
 
 // ============================================
 // TYPES
@@ -318,9 +328,19 @@ export default function Dashboard() {
   const [selectedCrypto, setSelectedCrypto] = useState<CryptoData | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>(DEFAULT_PAIRS);
   
+  // Tab & Signal tracking state
+  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+  const [trackedSignals, setTrackedSignals] = useState<TrackedSignal[]>([]);
+  const processedSignalsRef = useRef<Set<string>>(new Set());
+  
   // Load saved watchlist on mount
   useEffect(() => {
     setWatchlist(loadSavedPairs());
+  }, []);
+  
+  // Load tracked signals on mount
+  useEffect(() => {
+    setTrackedSignals(loadSignals());
   }, []);
   
   // WebSocket for real-time prices and EMAs
@@ -393,6 +413,88 @@ export default function Dashboard() {
       return crypto;
     });
   }, [data, wsPrices]);
+  
+  // Track new signals from strategies
+  useEffect(() => {
+    if (data.length === 0) return;
+    
+    for (const crypto of data) {
+      if (!crypto.strategies) continue;
+      
+      for (const strategy of crypto.strategies) {
+        // Only track non-neutral signals with entry/stop/target
+        if (strategy.signal.type === 'NEUTRAL') continue;
+        if (!strategy.signal.entry || !strategy.signal.stop || !strategy.signal.target) continue;
+        
+        // Create unique key for this signal
+        const signalKey = `${crypto.symbol}-${strategy.id}-${strategy.signal.type}`;
+        
+        // Skip if already processed recently (within last 5 mins)
+        if (processedSignalsRef.current.has(signalKey)) continue;
+        
+        // Add to processed set (expires after 5 mins to allow new signals)
+        processedSignalsRef.current.add(signalKey);
+        setTimeout(() => {
+          processedSignalsRef.current.delete(signalKey);
+        }, 5 * 60 * 1000);
+        
+        // Track the signal
+        const newSignal = addSignal({
+          symbol: crypto.symbol,
+          strategyId: strategy.id,
+          strategyName: strategy.name,
+          type: strategy.signal.type as TrackedSignal['type'],
+          entry: strategy.signal.entry,
+          stop: strategy.signal.stop,
+          target: strategy.signal.target,
+          strength: strategy.signal.strength,
+          reasons: strategy.signal.reasons,
+        });
+        
+        setTrackedSignals(prev => {
+          // Check if already exists
+          if (prev.some(s => s.id === newSignal.id)) return prev;
+          return [...prev, newSignal];
+        });
+      }
+    }
+  }, [data]);
+  
+  // Check signal outcomes with live prices
+  useEffect(() => {
+    if (trackedSignals.length === 0 || Object.keys(wsPrices).length === 0) return;
+    
+    // Build price map
+    const priceMap: Record<string, number> = {};
+    for (const [symbol, data] of Object.entries(wsPrices)) {
+      priceMap[symbol] = data.price;
+    }
+    
+    // Also add API prices for assets without live data
+    for (const crypto of mergedData) {
+      if (!priceMap[crypto.symbol]) {
+        priceMap[crypto.symbol] = crypto.price;
+      }
+    }
+    
+    const updatedSignals = checkSignalOutcomes(trackedSignals, priceMap);
+    
+    // Only update if something changed
+    const hasChanges = updatedSignals.some((s, i) => 
+      s.status !== trackedSignals[i]?.status
+    );
+    
+    if (hasChanges) {
+      setTrackedSignals(updatedSignals);
+    }
+  }, [trackedSignals, wsPrices, mergedData]);
+  
+  // Handle clear signals
+  const handleClearSignals = useCallback(() => {
+    clearAllSignals();
+    setTrackedSignals([]);
+    processedSignalsRef.current.clear();
+  }, []);
   
   // Filter data
   const filteredData = useMemo(() => {
@@ -561,6 +663,40 @@ export default function Dashboard() {
         <TradingSessions />
       </div>
       
+      {/* Tab Navigation */}
+      <div className="max-w-[2400px] mx-auto px-4 pt-4">
+        <TabNav 
+          activeTab={activeTab} 
+          onTabChange={setActiveTab}
+          signalCount={trackedSignals.length}
+          openSignalCount={trackedSignals.filter(s => s.status === 'OPEN').length}
+        />
+      </div>
+      
+      {/* Signals Tab */}
+      {activeTab === 'signals' && (
+        <div className="max-w-[2400px] mx-auto px-4 py-4">
+          <SignalsTab 
+            signals={trackedSignals} 
+            onClearSignals={handleClearSignals}
+          />
+        </div>
+      )}
+      
+      {/* Stats Tab */}
+      {activeTab === 'stats' && (
+        <div className="max-w-[2400px] mx-auto px-4 py-4">
+          <div className="text-center py-12 text-zinc-500">
+            <BarChart3 size={48} className="mx-auto mb-3 opacity-20" />
+            <p className="text-sm">Advanced Analytics Coming Soon</p>
+            <p className="text-xs mt-1">Backtest results, equity curves, drawdown analysis</p>
+          </div>
+        </div>
+      )}
+      
+      {/* Dashboard Tab Content */}
+      {activeTab === 'dashboard' && (
+        <>
       {/* Watchlist Selector */}
       <div className="max-w-[2400px] mx-auto px-4 pt-4">
         <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-3">
@@ -839,6 +975,8 @@ export default function Dashboard() {
           </p>
         </div>
       </div>
+        </>
+      )}
     </main>
   );
 }
