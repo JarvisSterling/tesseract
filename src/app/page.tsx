@@ -14,6 +14,7 @@ import { StrategyBadges } from '@/components/StrategySignals';
 import { TabNav, TabId } from '@/components/TabNav';
 import { SignalsTab } from '@/components/SignalsTab';
 import { StatsTab } from '@/components/StatsTab';
+import { BacktestTab } from '@/components/BacktestTab';
 import { 
   TrackedSignal, 
   loadSignals, 
@@ -746,6 +747,13 @@ export default function Dashboard() {
       {activeTab === 'stats' && (
         <div className="max-w-[2400px] mx-auto px-4 py-4">
           <StatsTab signals={trackedSignals} />
+        </div>
+      )}
+      
+      {/* Backtest Tab */}
+      {activeTab === 'backtest' && (
+        <div className="max-w-[2400px] mx-auto px-4 py-4">
+          <BacktestTab />
         </div>
       )}
       

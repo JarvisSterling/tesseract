@@ -1,8 +1,8 @@
 'use client';
 
-import { LayoutDashboard, Signal, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Signal, BarChart3, FlaskConical } from 'lucide-react';
 
-export type TabId = 'dashboard' | 'signals' | 'stats';
+export type TabId = 'dashboard' | 'signals' | 'stats' | 'backtest';
 
 interface Tab {
   id: TabId;
@@ -14,6 +14,7 @@ const TABS: Tab[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
   { id: 'signals', label: 'Signals', icon: <Signal size={16} /> },
   { id: 'stats', label: 'Stats', icon: <BarChart3 size={16} /> },
+  { id: 'backtest', label: 'Backtest', icon: <FlaskConical size={16} /> },
 ];
 
 interface TabNavProps {
