@@ -118,6 +118,7 @@ export function ChartModal({ crypto, livePrice, liveChange, onClose }: ChartModa
         background: { type: ColorType.Solid, color: '#18181b' },
         textColor: '#a1a1aa',
         fontSize: 12,
+        attributionLogo: false, // Remove TradingView logo
       },
       grid: {
         vertLines: { color: '#27272a' },

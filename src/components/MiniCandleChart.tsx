@@ -40,6 +40,7 @@ export function MiniCandleChart({
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#71717a',
         fontSize: 8,
+        attributionLogo: false, // Remove TradingView logo
       },
       grid: {
         vertLines: { visible: false },
