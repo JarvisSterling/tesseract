@@ -329,17 +329,21 @@ export default function Dashboard() {
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir }>({ field: 'confluence', dir: 'desc' });
   const [filter, setFilter] = useState<FilterMode>('all');
   const [selectedCrypto, setSelectedCrypto] = useState<CryptoData | null>(null);
-  const [watchlist, setWatchlist] = useState<string[]>(DEFAULT_PAIRS);
+  // Initialize watchlist synchronously from localStorage to prevent flash
+  const [watchlist, setWatchlist] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('tesseract-watchlist');
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return DEFAULT_PAIRS;
+  });
   
   // Tab & Signal tracking state
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [trackedSignals, setTrackedSignals] = useState<TrackedSignal[]>([]);
   const processedSignalsRef = useRef<Set<string>>(new Set());
-  
-  // Load saved watchlist on mount
-  useEffect(() => {
-    setWatchlist(loadSavedPairs());
-  }, []);
   
   // Load tracked signals on mount
   useEffect(() => {
@@ -357,6 +361,24 @@ export default function Dashboard() {
   
   // Track previous signal count for alert detection
   const prevSignalCountRef = useRef(0);
+  
+  // Load processed signals from localStorage to prevent re-tracking on refresh
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('tesseract-processed-signals');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          // Only load entries that are less than 30 minutes old
+          const now = Date.now();
+          const validEntries = Object.entries(parsed).filter(
+            ([_, timestamp]) => now - (timestamp as number) < 30 * 60 * 1000
+          );
+          validEntries.forEach(([key]) => processedSignalsRef.current.add(key));
+        }
+      } catch {}
+    }
+  }, []);
   
   // WebSocket for real-time prices and EMAs
   const { prices: wsPrices, connected, lastUpdate: wsLastUpdate, initializeEMAs } = useBinanceWebSocket(watchlist);
@@ -447,11 +469,26 @@ export default function Dashboard() {
         // Skip if already processed recently (within last 5 mins)
         if (processedSignalsRef.current.has(signalKey)) continue;
         
-        // Add to processed set (expires after 5 mins to allow new signals)
+        // Add to processed set (expires after 30 mins to allow new signals)
         processedSignalsRef.current.add(signalKey);
+        
+        // Save to localStorage for persistence across refreshes
+        try {
+          const saved = localStorage.getItem('tesseract-processed-signals');
+          const processed = saved ? JSON.parse(saved) : {};
+          processed[signalKey] = Date.now();
+          // Clean old entries (> 30 mins)
+          const now = Date.now();
+          const cleaned = Object.fromEntries(
+            Object.entries(processed).filter(([_, ts]) => now - (ts as number) < 30 * 60 * 1000)
+          );
+          localStorage.setItem('tesseract-processed-signals', JSON.stringify(cleaned));
+        } catch {}
+        
+        // Also set a timer to remove from memory after 30 mins
         setTimeout(() => {
           processedSignalsRef.current.delete(signalKey);
-        }, 5 * 60 * 1000);
+        }, 30 * 60 * 1000);
         
         // Track the signal
         const newSignal = addSignal({
