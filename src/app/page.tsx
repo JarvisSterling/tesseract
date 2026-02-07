@@ -23,7 +23,8 @@ import {
   clearAllSignals,
   isSignalProcessed,
   markSignalProcessed,
-  cleanupExpiredSignals
+  cleanupExpiredSignals,
+  cleanupNonWatchlistSignals
 } from '@/lib/signalTrackerDB';
 
 // ============================================
@@ -411,6 +412,18 @@ export default function Dashboard() {
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData, watchlist]);
+  
+  // Auto-cleanup closed signals for pairs not in watchlist
+  useEffect(() => {
+    if (watchlist.length > 0) {
+      cleanupNonWatchlistSignals(watchlist).then(count => {
+        if (count > 0) {
+          // Reload signals to reflect cleanup
+          loadSignals().then(signals => setTrackedSignals(signals));
+        }
+      });
+    }
+  }, [watchlist]);
   
   // Merge API data with live WebSocket prices and EMAs
   const mergedData = useMemo(() => {

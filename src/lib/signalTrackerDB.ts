@@ -392,3 +392,43 @@ export async function clearAllSignals(): Promise<void> {
     console.error('Failed to clear signals:', e);
   }
 }
+
+/**
+ * Clean up CLOSED signals for symbols not in watchlist
+ * Keeps OPEN positions intact (they need to be tracked until they close)
+ */
+export async function cleanupNonWatchlistSignals(watchlist: string[]): Promise<number> {
+  try {
+    const db = getSupabase();
+    
+    // Get all closed signals (status != 'active')
+    const { data: closedSignals, error: fetchError } = await db
+      .from('signals')
+      .select('id, symbol')
+      .neq('status', 'active');
+    
+    if (fetchError) throw fetchError;
+    if (!closedSignals || closedSignals.length === 0) return 0;
+    
+    // Find signals for symbols not in watchlist
+    const watchlistSet = new Set(watchlist.map(s => s.toUpperCase()));
+    const toDelete = closedSignals.filter(s => !watchlistSet.has(s.symbol.toUpperCase()));
+    
+    if (toDelete.length === 0) return 0;
+    
+    // Delete them
+    const idsToDelete = toDelete.map(s => s.id);
+    const { error: deleteError } = await db
+      .from('signals')
+      .delete()
+      .in('id', idsToDelete);
+    
+    if (deleteError) throw deleteError;
+    
+    console.log(`Cleaned up ${toDelete.length} closed signals for non-watchlist pairs`);
+    return toDelete.length;
+  } catch (e) {
+    console.error('Failed to cleanup non-watchlist signals:', e);
+    return 0;
+  }
+}
