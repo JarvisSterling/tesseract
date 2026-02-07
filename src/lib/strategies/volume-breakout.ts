@@ -132,22 +132,21 @@ export const volumeBreakout: Strategy = {
     const direction = priceBreakout.direction;
     reasons.push(`${direction === 'up' ? '📈' : '📉'} ${priceBreakout.direction?.toUpperCase()} breakout detected`);
     
-    // Base score for breakout
-    score += 25;
+    // V2: REQUIRE minimum volume (no low-volume breakouts at all)
+    if (volumeAnalysis.volumeRatio < 1.5) {
+      return { type: 'NEUTRAL', strength: 0, reasons: ['Volume too low for valid breakout'] };
+    }
     
-    // Volume is KEY
+    // Base score for breakout + volume confirmation
+    score += 30;
+    
+    // Volume is KEY - but now we already filtered weak volume
     if (volumeAnalysis.volumeSpike) {
-      score += 35;
+      score += 30;
       reasons.push(`🔥 Volume SPIKE: ${volumeAnalysis.volumeRatio.toFixed(1)}x average`);
-    } else if (volumeAnalysis.volumeRatio >= 1.5) {
-      score += 20;
-      reasons.push(`Volume elevated: ${volumeAnalysis.volumeRatio.toFixed(1)}x average`);
-    } else if (volumeAnalysis.volumeRatio >= 1.2) {
-      score += 10;
-      reasons.push(`Volume above average: ${volumeAnalysis.volumeRatio.toFixed(1)}x`);
     } else {
-      score -= 10;
-      reasons.push('⚠️ Low volume breakout - reduced conviction');
+      score += 15;
+      reasons.push(`Volume confirmed: ${volumeAnalysis.volumeRatio.toFixed(1)}x average`);
     }
     
     // Increasing volume pattern
@@ -174,16 +173,19 @@ export const volumeBreakout: Strategy = {
       reasons.push(`Momentum: ${momentum.toFixed(1)}%`);
     }
     
-    // EMA alignment
+    // V2: REQUIRE EMA alignment (only trade breakouts with trend)
     const ema21 = emas.values[21];
     const ema50 = emas.values[50];
     if (ema21 && ema50) {
-      if (direction === 'up' && price > ema21 && price > ema50) {
-        score += 10;
-        reasons.push('Price above key EMAs');
-      } else if (direction === 'down' && price < ema21 && price < ema50) {
-        score += 10;
-        reasons.push('Price below key EMAs');
+      if (direction === 'up' && price > ema21 && ema21 > ema50) {
+        score += 15;
+        reasons.push('✓ Trend aligned (EMAs bullish)');
+      } else if (direction === 'down' && price < ema21 && ema21 < ema50) {
+        score += 15;
+        reasons.push('✓ Trend aligned (EMAs bearish)');
+      } else {
+        // Counter-trend breakout - skip
+        return { type: 'NEUTRAL', strength: 0, reasons: ['Breakout against trend - skipping'] };
       }
     }
     

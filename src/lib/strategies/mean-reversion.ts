@@ -37,8 +37,8 @@ export const meanReversion: Strategy = {
     const deviation = ((price - ema21) / ema21) * 100;
     const absDeviation = Math.abs(deviation);
     
-    // V5: Lower threshold to 2% to generate more signals
-    if (absDeviation < 2.0) {
+    // V6: Require 3% deviation minimum (more extreme = higher probability)
+    if (absDeviation < 3.0) {
       return { type: 'NEUTRAL', strength: 0, reasons: ['Price within normal range'] };
     }
     
@@ -67,34 +67,38 @@ export const meanReversion: Strategy = {
     // Extension score (more extension = more potential snap back)
     score += Math.min(absDeviation * 10, 30);
     
-    // RSI is the key for mean reversion
-    if (rsi !== null) {
-      if (isOversold) {
-        if (rsi < 20) {
-          score += 35;
-          reasons.push(`RSI extremely oversold (${rsi.toFixed(0)})`);
-        } else if (rsi < 30) {
-          score += 25;
-          reasons.push(`RSI oversold (${rsi.toFixed(0)})`);
-        } else if (rsi < 40) {
-          score += 15;
-          reasons.push(`RSI low (${rsi.toFixed(0)})`);
-        } else if (rsi < 50) {
-          score += 5;
-        }
+    // V6: RSI MUST be extreme - this is the key filter
+    if (rsi === null) {
+      return { type: 'NEUTRAL', strength: 0, reasons: ['Need RSI data'] };
+    }
+    
+    if (isOversold) {
+      if (rsi >= 35) {
+        return { type: 'NEUTRAL', strength: 0, reasons: [`RSI ${rsi.toFixed(0)} not oversold enough`] };
+      }
+      if (rsi < 20) {
+        score += 40;
+        reasons.push(`🔥 RSI extremely oversold (${rsi.toFixed(0)})`);
+      } else if (rsi < 30) {
+        score += 30;
+        reasons.push(`RSI oversold (${rsi.toFixed(0)})`);
       } else {
-        if (rsi > 80) {
-          score += 35;
-          reasons.push(`RSI extremely overbought (${rsi.toFixed(0)})`);
-        } else if (rsi > 70) {
-          score += 25;
-          reasons.push(`RSI overbought (${rsi.toFixed(0)})`);
-        } else if (rsi > 60) {
-          score += 15;
-          reasons.push(`RSI high (${rsi.toFixed(0)})`);
-        } else if (rsi > 50) {
-          score += 5;
-        }
+        score += 20;
+        reasons.push(`RSI low (${rsi.toFixed(0)})`);
+      }
+    } else {
+      if (rsi <= 65) {
+        return { type: 'NEUTRAL', strength: 0, reasons: [`RSI ${rsi.toFixed(0)} not overbought enough`] };
+      }
+      if (rsi > 80) {
+        score += 40;
+        reasons.push(`🔥 RSI extremely overbought (${rsi.toFixed(0)})`);
+      } else if (rsi > 70) {
+        score += 30;
+        reasons.push(`RSI overbought (${rsi.toFixed(0)})`);
+      } else {
+        score += 20;
+        reasons.push(`RSI high (${rsi.toFixed(0)})`);
       }
     }
     
@@ -140,23 +144,33 @@ export const meanReversion: Strategy = {
       }
     }
     
-    // Check for reversal candle pattern (bonus, not required)
+    // V6: REQUIRE reversal candle confirmation (not just bonus)
     if (candles.length >= 2) {
       const current = candles[candles.length - 1];
       const prev = candles[candles.length - 2];
       const currentBody = current.close - current.open;
       const prevBody = prev.close - prev.open;
       
-      // Bullish reversal after red
-      if (isOversold && currentBody > 0 && prevBody < 0) {
-        score += 10;
-        reasons.push('Bullish candle forming');
+      // Bullish reversal: need green candle after red
+      if (isOversold) {
+        if (currentBody > 0 && prevBody < 0) {
+          score += 15;
+          reasons.push('✓ Bullish reversal candle');
+        } else if (currentBody <= 0) {
+          return { type: 'NEUTRAL', strength: 0, reasons: ['Waiting for bullish reversal candle'] };
+        }
       }
-      // Bearish reversal after green
-      if (isOverbought && currentBody < 0 && prevBody > 0) {
-        score += 10;
-        reasons.push('Bearish candle forming');
+      // Bearish reversal: need red candle after green
+      if (isOverbought) {
+        if (currentBody < 0 && prevBody > 0) {
+          score += 15;
+          reasons.push('✓ Bearish reversal candle');
+        } else if (currentBody >= 0) {
+          return { type: 'NEUTRAL', strength: 0, reasons: ['Waiting for bearish reversal candle'] };
+        }
       }
+    } else {
+      return { type: 'NEUTRAL', strength: 0, reasons: ['Insufficient candle data'] };
     }
     
     // Need minimum score
