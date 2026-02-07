@@ -47,21 +47,83 @@ async function runBacktest(symbols: string[], days: number): Promise<BacktestRes
     body: JSON.stringify({ symbols, days }),
   });
   
-  const json = await res.json();
+  // Check if response is OK first
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API returned ${res.status}: ${text.slice(0, 200)}`);
+  }
+  
+  const text = await res.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid JSON response: ${text.slice(0, 200)}`);
+  }
+  
   if (!json.success) throw new Error(json.error);
   return json.data.individual;
+}
+
+// Run backtests one symbol at a time to avoid timeout
+async function runBacktestSequential(symbols: string[], days: number): Promise<BacktestResult[]> {
+  const results: BacktestResult[] = [];
+  
+  for (const symbol of symbols) {
+    console.log(`   Fetching ${symbol}...`);
+    const timestamp = Date.now();
+    const res = await fetch(`https://tesseract-black.vercel.app/api/backtest?symbol=${symbol}&days=${days}&t=${timestamp}`, {
+      headers: { 
+        'Cache-Control': 'no-cache',
+      },
+    });
+    
+    if (!res.ok) {
+      console.log(`   ⚠️ ${symbol} failed: ${res.status}`);
+      continue;
+    }
+    
+    const text = await res.text();
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      console.log(`   ⚠️ ${symbol} invalid JSON: ${text.slice(0, 100)}`);
+      continue;
+    }
+    
+    if (json.success && json.data) {
+      results.push(json.data);
+      console.log(`   ✓ ${symbol}: ${json.data.trades.length} trades`);
+    } else {
+      console.log(`   ⚠️ ${symbol} error: ${json.error}`);
+    }
+    
+    // Small delay between requests
+    await new Promise(r => setTimeout(r, 500));
+  }
+  
+  return results;
 }
 
 async function analyze() {
   console.log('🔬 TESSERACT STRATEGY ANALYSIS\n');
   console.log('='.repeat(60));
   
-  // Run 365d backtest
+  // Run 365d backtest - sequential to avoid Vercel timeouts
   const symbols = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP'];
   const days = 365;
-  console.log(`\n📊 Running ${days}-day backtest on: ${symbols.join(', ')}\n`);
+  console.log(`\n📊 Running ${days}-day backtest on: ${symbols.join(', ')}`);
+  console.log('   (Sequential mode to avoid API timeouts)\n');
   
-  const results = await runBacktest(symbols, days);
+  const results = await runBacktestSequential(symbols, days);
+  
+  if (results.length === 0) {
+    console.log('\n❌ No backtest data returned. API may be overloaded.');
+    process.exit(1);
+  }
+  
+  console.log(`\n✅ Got data for ${results.length}/${symbols.length} symbols\n`);
   
   // Aggregate strategy stats across all symbols
   const strategyAgg = new Map<string, {

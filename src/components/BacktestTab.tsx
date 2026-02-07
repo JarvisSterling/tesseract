@@ -88,6 +88,8 @@ export function BacktestTab() {
   const [error, setError] = useState<string | null>(null);
   const [activeResultIndex, setActiveResultIndex] = useState(0);
 
+  const [progress, setProgress] = useState('');
+
   const runBacktest = useCallback(async () => {
     if (selectedSymbols.length === 0) {
       setError('Select at least one symbol');
@@ -96,27 +98,97 @@ export function BacktestTab() {
 
     setLoading(true);
     setError(null);
+    setProgress('');
 
     try {
-      const res = await fetch('/api/backtest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: selectedSymbols, days }),
-      });
+      // For 180d+ periods, run sequential to avoid Vercel timeout
+      if (days >= 180) {
+        const individual: BacktestResult[] = [];
+        
+        for (let i = 0; i < selectedSymbols.length; i++) {
+          const symbol = selectedSymbols[i];
+          setProgress(`Fetching ${symbol}... (${i + 1}/${selectedSymbols.length})`);
+          
+          const res = await fetch(`/api/backtest?symbol=${symbol}&days=${days}&t=${Date.now()}`);
+          
+          if (!res.ok) {
+            console.warn(`${symbol} failed: ${res.status}`);
+            continue;
+          }
+          
+          const json = await res.json();
+          if (json.success && json.data) {
+            individual.push(json.data);
+          }
+        }
+        
+        if (individual.length === 0) {
+          throw new Error('No data returned from any symbol');
+        }
+        
+        // Aggregate manually
+        const allTrades = individual.flatMap(r => r.trades);
+        const wins = allTrades.filter(t => t.outcome === 'win').length;
+        const losses = allTrades.filter(t => t.outcome === 'loss').length;
+        const totalPnl = allTrades.reduce((sum, t) => sum + t.pnlPercent, 0);
+        
+        const strategyMap = new Map<string, { name: string; trades: number; wins: number; pnl: number }>();
+        for (const result of individual) {
+          for (const stat of result.strategyStats) {
+            const existing = strategyMap.get(stat.strategyId) || { name: stat.strategyName, trades: 0, wins: 0, pnl: 0 };
+            existing.trades += stat.totalTrades;
+            existing.wins += stat.wins;
+            existing.pnl += stat.totalPnlPercent;
+            strategyMap.set(stat.strategyId, existing);
+          }
+        }
+        
+        const strategyRankings = Array.from(strategyMap.entries())
+          .map(([id, data]) => ({
+            strategyId: id,
+            strategyName: data.name,
+            totalTrades: data.trades,
+            winRate: data.trades > 0 ? (data.wins / data.trades) * 100 : 0,
+            totalPnlPercent: data.pnl,
+          }))
+          .sort((a, b) => b.totalPnlPercent - a.totalPnlPercent);
+        
+        setResults(individual);
+        setAggregated({
+          totalSymbols: individual.length,
+          totalTrades: allTrades.length,
+          wins,
+          losses,
+          winRate: allTrades.length > 0 ? (wins / allTrades.length) * 100 : 0,
+          totalPnlPercent: totalPnl,
+          avgPnlPerTrade: allTrades.length > 0 ? totalPnl / allTrades.length : 0,
+          bestStrategy: strategyRankings[0]?.strategyName || 'N/A',
+          strategyRankings,
+        });
+      } else {
+        // For shorter periods, use batch POST
+        const res = await fetch('/api/backtest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbols: selectedSymbols, days }),
+        });
 
-      const json = await res.json();
+        const json = await res.json();
 
-      if (!json.success) {
-        throw new Error(json.error || 'Backtest failed');
+        if (!json.success) {
+          throw new Error(json.error || 'Backtest failed');
+        }
+
+        setResults(json.data.individual);
+        setAggregated(json.data.aggregated);
       }
-
-      setResults(json.data.individual);
-      setAggregated(json.data.aggregated);
+      
       setActiveResultIndex(0);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to run backtest');
     } finally {
       setLoading(false);
+      setProgress('');
     }
   }, [selectedSymbols, days]);
 
@@ -189,7 +261,7 @@ export function BacktestTab() {
           {loading ? (
             <>
               <Loader2 size={18} className="animate-spin" />
-              Running Backtest...
+              {progress || 'Running Backtest...'}
             </>
           ) : (
             <>
