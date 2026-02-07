@@ -45,21 +45,28 @@ function formatDuration(openedAt: number, closedAt?: number): string {
   return `${minutes}m`;
 }
 
-function SignalRow({ signal, currentPrice }: { signal: TrackedSignal; currentPrice?: number }) {
+function SignalRow({ signal, currentPrice, allPrices }: { signal: TrackedSignal; currentPrice?: number; allPrices?: Record<string, number> }) {
   const isLong = signal.type.includes('LONG');
   const isStrong = signal.type.includes('STRONG');
   const isOpen = signal.status === 'OPEN';
+  
+  // Try to get current price - handle both "BTC" and "BTCUSDT" formats
+  let resolvedPrice = currentPrice;
+  if (!resolvedPrice && allPrices) {
+    const baseSymbol = signal.symbol.replace('USDT', '');
+    resolvedPrice = allPrices[baseSymbol] || allPrices[signal.symbol];
+  }
   
   // Calculate live P&L for open positions
   let displayPnl = signal.pnlPercent;
   let isLivePnl = false;
   
-  if (isOpen && currentPrice && signal.entry) {
+  if (isOpen && resolvedPrice && signal.entry) {
     isLivePnl = true;
     if (isLong) {
-      displayPnl = ((currentPrice - signal.entry) / signal.entry) * 100;
+      displayPnl = ((resolvedPrice - signal.entry) / signal.entry) * 100;
     } else {
-      displayPnl = ((signal.entry - currentPrice) / signal.entry) * 100;
+      displayPnl = ((signal.entry - resolvedPrice) / signal.entry) * 100;
     }
   }
   
@@ -389,6 +396,7 @@ export function SignalsTab({ signals, onClearSignals, currentPrices = {} }: Sign
                     key={signal.id} 
                     signal={signal} 
                     currentPrice={currentPrices[signal.symbol]}
+                    allPrices={currentPrices}
                   />
                 ))}
               </tbody>
