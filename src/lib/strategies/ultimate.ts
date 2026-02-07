@@ -52,9 +52,11 @@ const ALL_STRATEGIES = [
   volumeBreakout,
 ];
 
-// Thresholds
-const SIGNAL_THRESHOLD = 3.0;    // Weighted score needed to trigger
-const STRONG_THRESHOLD = 5.0;    // Score for strong signal
+// Thresholds - calibrated based on weight distribution
+// MACD (3.5) + Bollinger (2.7) agreeing = 6.2 max if both at 100%
+// Realistically: MACD (70%) + Bollinger (60%) = 2.45 + 1.62 = 4.07
+const SIGNAL_THRESHOLD = 2.0;    // ~2 top strategies agreeing at moderate strength
+const STRONG_THRESHOLD = 4.0;    // 3+ strategies agreeing strongly
 
 interface StrategyVote {
   strategyId: string;
@@ -132,12 +134,12 @@ export const ultimateStrategy: Strategy = {
     let agreeing: StrategyVote[] = [];
     let score = 0;
     
-    if (longScore >= SIGNAL_THRESHOLD && longScore > shortScore * 1.5) {
+    if (longScore >= SIGNAL_THRESHOLD && longScore > shortScore) {
       finalDirection = 'long';
       agreeing = longVotes;
       score = longScore;
       reasons.push(`✅ LONG confirmed (${longVotes.length} strategies)`);
-    } else if (shortScore >= SIGNAL_THRESHOLD && shortScore > longScore * 1.5) {
+    } else if (shortScore >= SIGNAL_THRESHOLD && shortScore > longScore) {
       finalDirection = 'short';
       agreeing = shortVotes;
       score = shortScore;
