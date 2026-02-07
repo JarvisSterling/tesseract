@@ -3,7 +3,7 @@
  */
 
 export type SignalType = 'STRONG_LONG' | 'LONG' | 'NEUTRAL' | 'SHORT' | 'STRONG_SHORT';
-export type StrategyCategory = 'swing' | 'scalp' | 'breakout' | 'reversal';
+export type StrategyCategory = 'swing' | 'scalp' | 'breakout' | 'reversal' | 'confluence';
 
 export interface StrategySignal {
   type: SignalType;
