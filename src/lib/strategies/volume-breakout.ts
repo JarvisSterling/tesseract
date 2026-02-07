@@ -1,33 +1,158 @@
 /**
- * Volume Breakout Strategy
+ * Volume Breakout Strategy V2
  * 
- * CONCEPT: Volume precedes price. When volume surges significantly
- * above average while price breaks a key level, it signals
- * institutional participation and conviction.
+ * ISOLATED CALCULATIONS - does not share indicators with other strategies
  * 
- * MATHEMATICS:
- * - Volume Surge = Current Volume / SMA(Volume, 20)
- * - Price Breakout = Close above/below N-period high/low
- * - Conviction Score = Volume Surge * Price Momentum
+ * V2 IMPROVEMENTS:
+ * - ADX filter: Only trade in trending markets (ADX > 25)
+ * - Higher volume threshold: 2.5x average (was 2x)
+ * - Better R:R: 3:1 target (was 2.5:1)
+ * - Trend alignment required: EMA stack must confirm direction
+ * - Strong close required: Close in top/bottom 30% of candle
  * 
- * SIGNALS:
- * - Bullish: 2x+ volume + new 20-period high + close in upper 25% of range
- * - Bearish: 2x+ volume + new 20-period low + close in lower 25% of range
- * 
- * KEY INSIGHT:
- * - High volume on breakout = institutions are buying/selling
- * - Low volume breakouts often fail (no conviction)
- * - The best breakouts have increasing volume bars
+ * Based on 365-day analysis showing:
+ * - Win rate degrades from 45% (7d) to 27% (365d)
+ * - Older period (180-365d) caused -87.8% P&L
+ * - Strategy fails in ranging/choppy markets
  */
 
 import { Strategy, StrategyInput, StrategySignal, SignalType, OHLCVData } from './types';
+
+// ============================================
+// ISOLATED INDICATOR CALCULATIONS
+// ============================================
+
+function calcEMA(data: number[], period: number): number[] {
+  const ema: number[] = [];
+  const k = 2 / (period + 1);
+  
+  for (let i = 0; i < data.length; i++) {
+    if (i === 0) {
+      ema.push(data[0]);
+    } else {
+      ema.push(data[i] * k + ema[i - 1] * (1 - k));
+    }
+  }
+  
+  return ema;
+}
+
+function calcSMA(data: number[], period: number): number | null {
+  if (data.length < period) return null;
+  const slice = data.slice(-period);
+  return slice.reduce((a, b) => a + b, 0) / period;
+}
+
+function calcRSI(closes: number[], period: number = 14): number | null {
+  if (closes.length < period + 1) return null;
+  
+  let gains = 0;
+  let losses = 0;
+  
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const change = closes[i] - closes[i - 1];
+    if (change > 0) gains += change;
+    else losses -= change;
+  }
+  
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+
+function calcATR(candles: OHLCVData[], period: number = 14): number | null {
+  if (candles.length < period + 1) return null;
+  
+  const trs: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const high = candles[i].high;
+    const low = candles[i].low;
+    const prevClose = candles[i - 1].close;
+    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+    trs.push(tr);
+  }
+  
+  if (trs.length < period) return null;
+  return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+
+/**
+ * Calculate ADX (Average Directional Index)
+ * ADX > 25 = trending market
+ * ADX < 20 = ranging/choppy market
+ */
+function calcADX(candles: OHLCVData[], period: number = 14): number | null {
+  if (candles.length < period * 2) return null;
+  
+  const plusDM: number[] = [];
+  const minusDM: number[] = [];
+  const tr: number[] = [];
+  
+  for (let i = 1; i < candles.length; i++) {
+    const high = candles[i].high;
+    const low = candles[i].low;
+    const prevHigh = candles[i - 1].high;
+    const prevLow = candles[i - 1].low;
+    const prevClose = candles[i - 1].close;
+    
+    // True Range
+    const trVal = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+    tr.push(trVal);
+    
+    // Directional Movement
+    const upMove = high - prevHigh;
+    const downMove = prevLow - low;
+    
+    if (upMove > downMove && upMove > 0) {
+      plusDM.push(upMove);
+    } else {
+      plusDM.push(0);
+    }
+    
+    if (downMove > upMove && downMove > 0) {
+      minusDM.push(downMove);
+    } else {
+      minusDM.push(0);
+    }
+  }
+  
+  if (tr.length < period) return null;
+  
+  // Smoothed averages
+  const smoothedTR = calcEMA(tr, period);
+  const smoothedPlusDM = calcEMA(plusDM, period);
+  const smoothedMinusDM = calcEMA(minusDM, period);
+  
+  // DI+ and DI-
+  const dx: number[] = [];
+  for (let i = period - 1; i < smoothedTR.length; i++) {
+    const plusDI = (smoothedPlusDM[i] / smoothedTR[i]) * 100;
+    const minusDI = (smoothedMinusDM[i] / smoothedTR[i]) * 100;
+    const diDiff = Math.abs(plusDI - minusDI);
+    const diSum = plusDI + minusDI;
+    dx.push(diSum > 0 ? (diDiff / diSum) * 100 : 0);
+  }
+  
+  if (dx.length < period) return null;
+  
+  // ADX is smoothed DX
+  const adx = calcEMA(dx, period);
+  return adx[adx.length - 1];
+}
+
+// ============================================
+// VOLUME ANALYSIS
+// ============================================
 
 interface VolumeAnalysis {
   currentVolume: number;
   avgVolume: number;
   volumeRatio: number;
-  volumeIncreasing: boolean; // 3 consecutive higher volume bars
-  volumeSpike: boolean; // > 2x average
+  volumeIncreasing: boolean;
+  volumeSpike: boolean;
 }
 
 function analyzeVolume(candles: OHLCVData[]): VolumeAnalysis {
@@ -42,21 +167,25 @@ function analyzeVolume(candles: OHLCVData[]): VolumeAnalysis {
   const currentVolume = volumes[volumes.length - 1];
   const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
   
-  // Check for 3 consecutive increasing volume bars
   const lastThree = volumes.slice(-3);
   const volumeIncreasing = lastThree.length === 3 && 
     lastThree[2] > lastThree[1] && lastThree[1] > lastThree[0];
   
-  const volumeSpike = volumeRatio >= 2.0;
+  // V2: Higher threshold - 2.5x instead of 2x
+  const volumeSpike = volumeRatio >= 2.5;
   
   return { currentVolume, avgVolume, volumeRatio, volumeIncreasing, volumeSpike };
 }
 
+// ============================================
+// PRICE BREAKOUT DETECTION
+// ============================================
+
 interface PriceBreakout {
   isBreakout: boolean;
   direction: 'up' | 'down' | null;
-  strength: number; // How far past the level
-  closePosition: number; // 0-1, where in candle range the close is
+  strength: number;
+  closePosition: number;
 }
 
 function analyzePriceBreakout(candles: OHLCVData[], lookback: number = 20): PriceBreakout {
@@ -71,19 +200,16 @@ function analyzePriceBreakout(candles: OHLCVData[], lookback: number = 20): Pric
   const lowestLow = Math.min(...previous.map(c => c.low));
   const range = highestHigh - lowestLow;
   
-  // Where did the current candle close within its range?
   const candleRange = current.high - current.low;
   const closePosition = candleRange > 0 
     ? (current.close - current.low) / candleRange 
     : 0.5;
   
-  // Bullish breakout: close above previous high
   if (current.close > highestHigh) {
     const strength = range > 0 ? (current.close - highestHigh) / range * 100 : 0;
     return { isBreakout: true, direction: 'up', strength, closePosition };
   }
   
-  // Bearish breakout: close below previous low
   if (current.close < lowestLow) {
     const strength = range > 0 ? (lowestLow - current.close) / range * 100 : 0;
     return { isBreakout: true, direction: 'down', strength, closePosition };
@@ -92,138 +218,184 @@ function analyzePriceBreakout(candles: OHLCVData[], lookback: number = 20): Pric
   return { isBreakout: false, direction: null, strength: 0, closePosition };
 }
 
-function calcMomentum(candles: OHLCVData[], period: number = 10): number {
-  if (candles.length < period) return 0;
-  
-  const closes = candles.map(c => c.close);
-  const current = closes[closes.length - 1];
-  const past = closes[closes.length - period];
-  
-  return past > 0 ? ((current - past) / past) * 100 : 0;
-}
+// ============================================
+// MAIN STRATEGY
+// ============================================
 
 export const volumeBreakout: Strategy = {
   id: 'volume-breakout',
   name: 'Volume Breakout',
-  description: 'Enter on high-volume breakouts of key levels with institutional conviction',
+  description: 'V2: High-volume breakouts with ADX trend filter and isolated indicators',
   category: 'breakout',
   timeframes: ['15m', '1h', '4h'],
   
   evaluate: (input: StrategyInput): StrategySignal => {
-    const { price, candles, indicators } = input;
-    const { emas, atr, rsi } = indicators;
+    const { price, candles } = input;
     
-    if (candles.length < 25) {
+    if (candles.length < 50) {
       return { type: 'NEUTRAL', strength: 0, reasons: ['Insufficient data'] };
     }
     
+    // ============================================
+    // ISOLATED INDICATOR CALCULATIONS
+    // ============================================
+    const closes = candles.map(c => c.close);
+    
+    // Own EMA calculations
+    const ema9 = calcEMA(closes, 9);
+    const ema21 = calcEMA(closes, 21);
+    const ema50 = calcEMA(closes, 50);
+    
+    const currentEma9 = ema9[ema9.length - 1];
+    const currentEma21 = ema21[ema21.length - 1];
+    const currentEma50 = ema50[ema50.length - 1];
+    
+    // Own RSI
+    const rsi = calcRSI(closes, 14);
+    
+    // Own ATR
+    const atr = calcATR(candles, 14);
+    
+    // Own ADX - KEY FILTER FOR V2
+    const adx = calcADX(candles, 14);
+    
+    // ============================================
+    // ADX TREND FILTER (V2 KEY IMPROVEMENT)
+    // ============================================
+    if (adx === null || adx < 25) {
+      return { 
+        type: 'NEUTRAL', 
+        strength: 0, 
+        reasons: [`Market not trending (ADX: ${adx?.toFixed(1) || 'N/A'} < 25)`] 
+      };
+    }
+    
+    // ============================================
+    // VOLUME & BREAKOUT ANALYSIS
+    // ============================================
     const volumeAnalysis = analyzeVolume(candles);
     const priceBreakout = analyzePriceBreakout(candles, 20);
-    const momentum = calcMomentum(candles, 10);
     
-    const reasons: string[] = [];
-    let score = 0;
-    
-    // No breakout = no trade
     if (!priceBreakout.isBreakout) {
       return { type: 'NEUTRAL', strength: 0, reasons: ['No price breakout detected'] };
     }
     
-    const direction = priceBreakout.direction;
-    reasons.push(`${direction === 'up' ? '📈' : '📉'} ${priceBreakout.direction?.toUpperCase()} breakout detected`);
+    const direction = priceBreakout.direction!;
+    const reasons: string[] = [];
+    let score = 0;
     
-    // Base score for breakout
+    reasons.push(`${direction === 'up' ? '📈' : '📉'} ${direction.toUpperCase()} breakout | ADX: ${adx.toFixed(1)}`);
+    
+    // ============================================
+    // V2: STRICTER VOLUME REQUIREMENT
+    // ============================================
+    if (!volumeAnalysis.volumeSpike && volumeAnalysis.volumeRatio < 2.0) {
+      return { 
+        type: 'NEUTRAL', 
+        strength: 0, 
+        reasons: [`Volume too low (${volumeAnalysis.volumeRatio.toFixed(1)}x < 2.0x required)`] 
+      };
+    }
+    
+    // Base score
     score += 25;
     
-    // Volume is KEY
+    // Volume scoring
     if (volumeAnalysis.volumeSpike) {
-      score += 35;
-      reasons.push(`🔥 Volume SPIKE: ${volumeAnalysis.volumeRatio.toFixed(1)}x average`);
-    } else if (volumeAnalysis.volumeRatio >= 1.5) {
+      score += 30;
+      reasons.push(`🔥 Volume SPIKE: ${volumeAnalysis.volumeRatio.toFixed(1)}x`);
+    } else if (volumeAnalysis.volumeRatio >= 2.0) {
       score += 20;
-      reasons.push(`Volume elevated: ${volumeAnalysis.volumeRatio.toFixed(1)}x average`);
-    } else if (volumeAnalysis.volumeRatio >= 1.2) {
-      score += 10;
-      reasons.push(`Volume above average: ${volumeAnalysis.volumeRatio.toFixed(1)}x`);
-    } else {
-      score -= 10;
-      reasons.push('⚠️ Low volume breakout - reduced conviction');
+      reasons.push(`Volume: ${volumeAnalysis.volumeRatio.toFixed(1)}x`);
     }
     
-    // Increasing volume pattern
     if (volumeAnalysis.volumeIncreasing) {
-      score += 15;
-      reasons.push('Volume building (3 increasing bars)');
+      score += 10;
+      reasons.push('Volume building');
     }
     
-    // Candle close position (conviction)
-    if (direction === 'up' && priceBreakout.closePosition >= 0.75) {
-      score += 10;
-      reasons.push('Strong close near highs');
-    } else if (direction === 'down' && priceBreakout.closePosition <= 0.25) {
-      score += 10;
-      reasons.push('Strong close near lows');
-    }
+    // ============================================
+    // V2: REQUIRE TREND ALIGNMENT (EMA STACK)
+    // ============================================
+    const emaBullish = price > currentEma9 && currentEma9 > currentEma21 && currentEma21 > currentEma50;
+    const emaBearish = price < currentEma9 && currentEma9 < currentEma21 && currentEma21 < currentEma50;
     
-    // Momentum confirmation
-    if (direction === 'up' && momentum > 1) {
-      score += 10;
-      reasons.push(`Momentum: +${momentum.toFixed(1)}%`);
-    } else if (direction === 'down' && momentum < -1) {
-      score += 10;
-      reasons.push(`Momentum: ${momentum.toFixed(1)}%`);
-    }
-    
-    // EMA alignment
-    const ema21 = emas.values[21];
-    const ema50 = emas.values[50];
-    if (ema21 && ema50) {
-      if (direction === 'up' && price > ema21 && price > ema50) {
+    if (direction === 'up') {
+      if (emaBullish) {
+        score += 20;
+        reasons.push('✓ EMA stack bullish');
+      } else if (price > currentEma21) {
         score += 10;
-        reasons.push('Price above key EMAs');
-      } else if (direction === 'down' && price < ema21 && price < ema50) {
+        reasons.push('Price above EMA21');
+      } else {
+        return { type: 'NEUTRAL', strength: 0, reasons: ['Breakout against EMA trend'] };
+      }
+    } else {
+      if (emaBearish) {
+        score += 20;
+        reasons.push('✓ EMA stack bearish');
+      } else if (price < currentEma21) {
         score += 10;
-        reasons.push('Price below key EMAs');
+        reasons.push('Price below EMA21');
+      } else {
+        return { type: 'NEUTRAL', strength: 0, reasons: ['Breakout against EMA trend'] };
       }
     }
     
-    // RSI not at extreme (room to run)
+    // ============================================
+    // V2: REQUIRE STRONG CLOSE POSITION
+    // ============================================
+    if (direction === 'up' && priceBreakout.closePosition < 0.70) {
+      return { type: 'NEUTRAL', strength: 0, reasons: ['Weak close - need close in top 30%'] };
+    }
+    if (direction === 'down' && priceBreakout.closePosition > 0.30) {
+      return { type: 'NEUTRAL', strength: 0, reasons: ['Weak close - need close in bottom 30%'] };
+    }
+    
+    score += 15;
+    reasons.push('Strong close position');
+    
+    // RSI confirmation
     if (rsi !== null) {
-      if (direction === 'up' && rsi < 70) {
-        score += 5;
-      } else if (direction === 'up' && rsi >= 75) {
-        score -= 10;
+      if (direction === 'up' && rsi >= 75) {
+        score -= 15;
         reasons.push('⚠️ RSI overbought');
-      } else if (direction === 'down' && rsi > 30) {
-        score += 5;
       } else if (direction === 'down' && rsi <= 25) {
-        score -= 10;
+        score -= 15;
         reasons.push('⚠️ RSI oversold');
+      } else {
+        score += 5;
       }
     }
     
-    // Calculate levels
+    // ============================================
+    // SIGNAL GENERATION WITH BETTER R:R
+    // ============================================
     let signal: SignalType = 'NEUTRAL';
     let stop: number | undefined;
     let target: number | undefined;
     
-    const atrStop = atr ? atr * 1.2 : price * 0.015; // Tighter stop for breakouts
-    
-    if (score >= 50) {
-      signal = score >= 75 
+    // V2: Higher threshold for entry
+    if (score >= 60) {
+      signal = score >= 80 
         ? (direction === 'up' ? 'STRONG_LONG' : 'STRONG_SHORT')
         : (direction === 'up' ? 'LONG' : 'SHORT');
       
+      const atrValue = atr || price * 0.015;
+      
       if (direction === 'up') {
-        // Stop below breakout level
         const breakoutLevel = Math.max(...candles.slice(-21, -1).map(c => c.high));
-        stop = Math.max(breakoutLevel * 0.995, price - atrStop);
-        target = price + (atrStop * 2.5);
+        stop = Math.max(breakoutLevel * 0.995, price - atrValue * 1.2);
+        // V2: 3:1 R:R instead of 2.5:1
+        target = price + (Math.abs(price - stop) * 3.0);
       } else {
         const breakoutLevel = Math.min(...candles.slice(-21, -1).map(c => c.low));
-        stop = Math.min(breakoutLevel * 1.005, price + atrStop);
-        target = price - (atrStop * 2.5);
+        stop = Math.min(breakoutLevel * 1.005, price + atrValue * 1.2);
+        target = price - (Math.abs(stop - price) * 3.0);
       }
+      
+      const rr = Math.abs(target - price) / Math.abs(price - stop);
+      reasons.push(`R:R ${rr.toFixed(1)}:1`);
     }
     
     return {
