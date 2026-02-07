@@ -56,9 +56,9 @@ async function analyze() {
   console.log('🔬 TESSERACT STRATEGY ANALYSIS\n');
   console.log('='.repeat(60));
   
-  // Run 180-day backtest on major coins (double the data!)
+  // Run 90-day backtest for faster iteration
   const symbols = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP'];
-  const days = 180;
+  const days = 90;
   console.log(`\n📊 Running ${days}-day backtest on: ${symbols.join(', ')}\n`);
   
   const results = await runBacktest(symbols, days);
@@ -163,16 +163,17 @@ async function analyze() {
     );
   });
   
-  // Identify underperformers
+  // Identify underperformers (P&L-based, not win rate!)
+  // A strategy can have 30% win rate and still be profitable with good R:R
   console.log('\n\n🔴 UNDERPERFORMING STRATEGIES (need fixing)\n');
   console.log('-'.repeat(80));
   
   const underperformers = finalStats.filter(s => 
-    s.totalPnl < 0 || s.winRate < 40 || s.profitFactor < 1
+    s.totalPnl < 0 || s.profitFactor < 1.0
   );
   
   if (underperformers.length === 0) {
-    console.log('All strategies are performing well! 🎉');
+    console.log('All strategies are profitable! 🎉');
   } else {
     for (const stat of underperformers) {
       console.log(`\n❌ ${stat.name} (${stat.id})`);
@@ -185,11 +186,10 @@ async function analyze() {
       
       // Analysis
       const issues: string[] = [];
-      if (stat.winRate < 40) issues.push('Low win rate - signals too aggressive');
-      if (stat.avgLoss > stat.avgWin) issues.push('Avg loss > avg win - need tighter stops or wider targets');
-      if (stat.maxConsecLosses > 5) issues.push('High consecutive losses - poor trend detection');
-      if (stat.avgHolding < 4) issues.push('Very short trades - possibly noise trading');
-      if (stat.trades < 10) issues.push('Low trade count - may need more aggressive signals');
+      if (stat.profitFactor < 1) issues.push('PF < 1.0 - losing money on average');
+      if (stat.avgLoss > stat.avgWin * 1.5) issues.push('R:R imbalanced - need tighter stops or wider targets');
+      if (stat.maxConsecLosses > 10) issues.push('High drawdown risk - streak of losses');
+      if (stat.trades < 10) issues.push('Low sample size - results may not be reliable');
       
       if (issues.length > 0) {
         console.log('   📋 Issues:');
@@ -198,15 +198,16 @@ async function analyze() {
     }
   }
   
-  // Top performers analysis
-  console.log('\n\n🟢 TOP PERFORMERS (study these)\n');
+  // Top performers analysis (sorted by P&L, already done above)
+  console.log('\n\n🟢 TOP PERFORMERS (best strategies)\n');
   console.log('-'.repeat(80));
   
-  const topPerformers = finalStats.filter(s => s.totalPnl > 0 && s.winRate >= 45);
+  // Top 3 by P&L (they're already sorted)
+  const topPerformers = finalStats.filter(s => s.totalPnl > 0 && s.profitFactor >= 1.1);
   for (const stat of topPerformers.slice(0, 3)) {
     console.log(`\n✅ ${stat.name}`);
-    console.log(`   • What's working: Win rate ${stat.winRate.toFixed(1)}%, PF ${stat.profitFactor.toFixed(2)}`);
-    console.log(`   • Edge: +${stat.expectancy.toFixed(2)}% per trade`);
+    console.log(`   • P&L: +${stat.totalPnl.toFixed(2)}% | PF: ${stat.profitFactor.toFixed(2)} | Win Rate: ${stat.winRate.toFixed(1)}%`);
+    console.log(`   • Edge: +${stat.expectancy.toFixed(2)}% per trade | Trades: ${stat.trades}`);
   }
   
   // Save results for reference
