@@ -17,6 +17,7 @@ import { macdMomentum } from './macd-momentum';
 import { bollingerSqueeze } from './bollinger-squeeze';
 import { volumeBreakout } from './volume-breakout';
 import { meanReversion } from './mean-reversion';
+import { ultimateStrategy } from './ultimate';
 
 // ============================================
 // STRATEGY REGISTRY
@@ -41,6 +42,9 @@ export const STRATEGIES: Strategy[] = [
   // Reversal
   divergenceHunter,
   meanReversion,
+  
+  // Meta / Confluence
+  ultimateStrategy,
 ];
 
 export const STRATEGY_MAP = new Map<string, Strategy>(
