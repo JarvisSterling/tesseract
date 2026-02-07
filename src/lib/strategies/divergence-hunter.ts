@@ -196,24 +196,23 @@ export const divergenceHunter: Strategy = {
       signal = isStrong ? 'STRONG_SHORT' : 'SHORT';
     }
     
-    // V2 FIX: ATR-based stops with proper R:R
-    // Use 1.2x ATR for stops (tighter than before)
-    // Target 2x the stop distance (2:1 R:R)
+    // V3 FIX: Wider stops (divergences need room to play out)
+    // 1.8x ATR stops, 1.5:1 R:R targets
     const atrValue = atr || price * 0.015;
-    const stopDistance = atrValue * 1.2;
+    const stopDistance = atrValue * 1.8; // Wider stops
     
     let stop: number;
     let target: number;
     
     if (isLong) {
       stop = price - stopDistance;
-      target = price + (stopDistance * 2); // 2:1 R:R
+      target = price + (stopDistance * 1.5); // 1.5:1 R:R
     } else {
       stop = price + stopDistance;
-      target = price - (stopDistance * 2); // 2:1 R:R
+      target = price - (stopDistance * 1.5); // 1.5:1 R:R
     }
     
-    reasons.push(`R:R ratio 2:1`);
+    reasons.push(`R:R ratio 1.5:1`);
     
     return {
       type: signal,
