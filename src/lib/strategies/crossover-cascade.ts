@@ -1,26 +1,65 @@
 /**
- * Crossover Cascade Strategy (Momentum Trading)
+ * Crossover Cascade Strategy V2 - FIXED R:R
  * 
- * CONCEPT: Single EMA crossovers produce many false signals. But when
- * multiple EMAs cross in sequence (a "cascade"), it confirms real momentum.
+ * PROBLEM WITH V1:
+ * - 59% win rate but -6% P&L
+ * - Avg win +4.00%, Avg loss -5.85% (inverted R:R!)
+ * - Stop was EMA-based (too wide), target was fixed % (too tight)
  * 
- * MATHEMATICS:
- * - Track when EMA9 crosses EMA21
- * - Then when EMA21 crosses EMA50
- * - Cascade = multiple crosses within N bars
- * - Filter: All crossing EMAs must have positive slopes
- * 
- * LOGIC:
- * - Bull cascade: 9 crosses above 21, 21 crosses above 50 (or all above 50)
- * - All EMAs should be rising (positive slopes)
- * - Volume should confirm momentum
- * 
- * KEY INSIGHT:
- * - The "stale" crossover problem: crosses that happened long ago are weak
- * - Fresh cascade (within 5-10 bars) = strong signal
+ * V2 FIXES:
+ * - ATR-based stops (consistent risk per trade)
+ * - Target = 1.5x stop distance (positive R:R)
+ * - Tighter entry requirements (only trade fresh cascades)
+ * - Isolated calculations
  */
 
-import { Strategy, StrategyInput, StrategySignal, SignalType } from './types';
+import { Strategy, StrategyInput, StrategySignal, SignalType, OHLCVData } from './types';
+
+// ============================================
+// ISOLATED INDICATOR CALCULATIONS
+// ============================================
+
+function calcEMASeries(prices: number[], period: number): number[] {
+  if (prices.length < period) return [];
+  const k = 2 / (period + 1);
+  const series: number[] = [];
+  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  series.push(ema);
+  for (let i = period; i < prices.length; i++) {
+    ema = (prices[i] - ema) * k + ema;
+    series.push(ema);
+  }
+  return series;
+}
+
+function calcATR(candles: OHLCVData[], period: number = 14): number | null {
+  if (candles.length < period + 1) return null;
+  
+  let atr = 0;
+  for (let i = 1; i <= period; i++) {
+    const high = candles[i].high;
+    const low = candles[i].low;
+    const prevClose = candles[i - 1].close;
+    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+    atr += tr;
+  }
+  atr /= period;
+  
+  // Wilder's smoothing for rest
+  for (let i = period + 1; i < candles.length; i++) {
+    const high = candles[i].high;
+    const low = candles[i].low;
+    const prevClose = candles[i - 1].close;
+    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+    atr = (atr * (period - 1) + tr) / period;
+  }
+  
+  return atr;
+}
+
+// ============================================
+// CROSSOVER DETECTION
+// ============================================
 
 interface CrossoverInfo {
   crossed: boolean;
@@ -64,180 +103,228 @@ function detectCrossover(
   return { crossed: false, barsAgo: 0, direction: 'bull' };
 }
 
-function calculateCascadeScore(
-  cross9_21: CrossoverInfo,
-  cross21_50: CrossoverInfo,
-  direction: 'bull' | 'bear'
-): { score: number; isCascade: boolean; freshness: number } {
-  // Both must have crossed in same direction
-  if (!cross9_21.crossed && !cross21_50.crossed) {
-    return { score: 0, isCascade: false, freshness: 0 };
-  }
-  
-  if (cross9_21.crossed && cross21_50.crossed) {
-    if (cross9_21.direction !== direction || cross21_50.direction !== direction) {
-      return { score: 0, isCascade: false, freshness: 0 };
-    }
-    
-    // Full cascade! Score based on freshness
-    const avgBarsAgo = (cross9_21.barsAgo + cross21_50.barsAgo) / 2;
-    const freshness = Math.max(0, 100 - avgBarsAgo * 10); // Newer = better
-    
-    return { 
-      score: 60 + freshness * 0.4, 
-      isCascade: true, 
-      freshness 
-    };
-  }
-  
-  // Only one crossover - partial signal
-  const cross = cross9_21.crossed ? cross9_21 : cross21_50;
-  if (cross.direction !== direction) {
-    return { score: 0, isCascade: false, freshness: 0 };
-  }
-  
-  const freshness = Math.max(0, 100 - cross.barsAgo * 10);
-  return { 
-    score: 30 + freshness * 0.2, 
-    isCascade: false, 
-    freshness 
-  };
+// ============================================
+// CASCADE ANALYSIS
+// ============================================
+
+interface CascadeResult {
+  isCascade: boolean;
+  direction: 'bull' | 'bear' | null;
+  score: number;
+  freshness: number;
+  aligned: boolean;
 }
 
-function calculateMomentumScore(
-  slopes: Record<number, number | null>,
-  direction: 'bull' | 'bear'
-): number {
-  const slope9 = slopes[9];
-  const slope21 = slopes[21];
-  const slope50 = slopes[50];
+function analyzeCascade(
+  series9: number[],
+  series21: number[],
+  series50: number[],
+  price: number
+): CascadeResult {
+  const cross9_21 = detectCrossover(series9, series21, 8);  // V2: tighter lookback
+  const cross21_50 = detectCrossover(series21, series50, 8);
   
-  let score = 0;
-  let validSlopes = 0;
-  
-  const checkSlope = (slope: number | null, weight: number) => {
-    if (slope === null) return;
-    validSlopes++;
-    
-    if (direction === 'bull' && slope > 0.3) {
-      score += weight * (Math.min(slope / 2, 1)); // Normalize strong slopes
-    } else if (direction === 'bear' && slope < -0.3) {
-      score += weight * (Math.min(Math.abs(slope) / 2, 1));
-    }
-  };
-  
-  checkSlope(slope9, 40);
-  checkSlope(slope21, 35);
-  checkSlope(slope50, 25);
-  
-  return validSlopes > 0 ? (score / validSlopes) * 100 : 0;
-}
-
-function getCurrentAlignment(
-  emas: Record<number, number | null>,
-  direction: 'bull' | 'bear'
-): { aligned: boolean; score: number } {
-  const ema9 = emas[9];
-  const ema21 = emas[21];
-  const ema50 = emas[50];
+  // Current values
+  const ema9 = series9[series9.length - 1];
+  const ema21 = series21[series21.length - 1];
+  const ema50 = series50[series50.length - 1];
   
   if (!ema9 || !ema21 || !ema50) {
-    return { aligned: false, score: 0 };
+    return { isCascade: false, direction: null, score: 0, freshness: 0, aligned: false };
   }
   
+  // Check current alignment
+  const bullAligned = ema9 > ema21 && ema21 > ema50 && price > ema9;
+  const bearAligned = ema9 < ema21 && ema21 < ema50 && price < ema9;
+  
+  // Determine direction
+  let direction: 'bull' | 'bear' | null = null;
+  if (bullAligned) direction = 'bull';
+  else if (bearAligned) direction = 'bear';
+  
+  if (!direction) {
+    return { isCascade: false, direction: null, score: 0, freshness: 0, aligned: false };
+  }
+  
+  // Check for cascade (both crossovers in same direction)
+  const bothCrossed = cross9_21.crossed && cross21_50.crossed;
+  const sameDirection = cross9_21.direction === direction && cross21_50.direction === direction;
+  const isCascade = bothCrossed && sameDirection;
+  
+  // Calculate freshness (newer = better)
+  let freshness = 0;
+  if (isCascade) {
+    const avgBars = (cross9_21.barsAgo + cross21_50.barsAgo) / 2;
+    freshness = Math.max(0, 100 - avgBars * 15);  // V2: penalize stale crossovers more
+  } else if (cross9_21.crossed && cross9_21.direction === direction) {
+    freshness = Math.max(0, 100 - cross9_21.barsAgo * 15);
+  }
+  
+  // Score
+  let score = 0;
+  if (isCascade) {
+    score = 50 + (freshness * 0.5);  // 50-100 for cascade
+  } else if (cross9_21.crossed && cross9_21.direction === direction) {
+    score = 20 + (freshness * 0.3);  // 20-50 for single crossover
+  }
+  
+  return {
+    isCascade,
+    direction,
+    score,
+    freshness,
+    aligned: bullAligned || bearAligned
+  };
+}
+
+// ============================================
+// MOMENTUM CHECK
+// ============================================
+
+function checkMomentum(series9: number[], series21: number[], direction: 'bull' | 'bear'): number {
+  if (series9.length < 5 || series21.length < 5) return 0;
+  
+  // Calculate slopes
+  const ema9Now = series9[series9.length - 1];
+  const ema9Prev = series9[series9.length - 5];
+  const ema21Now = series21[series21.length - 1];
+  const ema21Prev = series21[series21.length - 5];
+  
+  const slope9 = ((ema9Now - ema9Prev) / ema9Prev) * 100;
+  const slope21 = ((ema21Now - ema21Prev) / ema21Prev) * 100;
+  
   if (direction === 'bull') {
-    const aligned = ema9 > ema21 && ema21 > ema50;
-    const score = aligned ? 100 : (ema9 > ema21 ? 50 : 0);
-    return { aligned, score };
+    if (slope9 > 0.5 && slope21 > 0.3) return 100;
+    if (slope9 > 0.2 && slope21 > 0.1) return 70;
+    if (slope9 > 0) return 40;
+    return 0;
   } else {
-    const aligned = ema9 < ema21 && ema21 < ema50;
-    const score = aligned ? 100 : (ema9 < ema21 ? 50 : 0);
-    return { aligned, score };
+    if (slope9 < -0.5 && slope21 < -0.3) return 100;
+    if (slope9 < -0.2 && slope21 < -0.1) return 70;
+    if (slope9 < 0) return 40;
+    return 0;
   }
 }
+
+// ============================================
+// MAIN STRATEGY
+// ============================================
 
 export const crossoverCascade: Strategy = {
   id: 'crossover-cascade',
   name: 'Crossover Cascade',
-  description: 'Momentum strategy: Enter on confirmed multi-EMA crossover cascades',
+  description: 'V2: Multi-EMA crossover cascades with fixed R:R',
   category: 'swing',
-  timeframes: ['1h', '4h', '1d'],
+  timeframes: ['1h', '4h'],
   
   evaluate: (input: StrategyInput): StrategySignal => {
-    const { price, indicators } = input;
-    const { emas, volume } = indicators;
+    const { price, candles } = input;
     
-    const series9 = emas.series[9] || [];
-    const series21 = emas.series[21] || [];
-    const series50 = emas.series[50] || [];
-    
-    // Detect crossovers
-    const cross9_21 = detectCrossover(series9, series21, 10);
-    const cross21_50 = detectCrossover(series21, series50, 10);
-    
-    // Determine primary direction based on current alignment
-    const bullAlignment = getCurrentAlignment(emas.values, 'bull');
-    const bearAlignment = getCurrentAlignment(emas.values, 'bear');
-    
-    const direction: 'bull' | 'bear' = bullAlignment.score > bearAlignment.score ? 'bull' : 'bear';
-    
-    const cascadeResult = calculateCascadeScore(cross9_21, cross21_50, direction);
-    const momentumScore = calculateMomentumScore(emas.slopes, direction);
-    const alignmentScore = direction === 'bull' ? bullAlignment.score : bearAlignment.score;
-    
-    const reasons: string[] = [];
-    
-    if (cascadeResult.isCascade) {
-      reasons.push(`${direction === 'bull' ? 'Bullish' : 'Bearish'} cascade detected`);
-      reasons.push(`Freshness: ${cascadeResult.freshness.toFixed(0)}%`);
-    } else if (cascadeResult.score > 0) {
-      reasons.push(`Partial ${direction} crossover`);
+    if (candles.length < 60) {
+      return { type: 'NEUTRAL', strength: 0, reasons: ['Insufficient data'] };
     }
     
-    if (momentumScore > 50) {
-      reasons.push(`Strong ${direction} momentum (slopes aligned)`);
+    const closes = candles.map(c => c.close);
+    
+    // Isolated EMA calculations
+    const series9 = calcEMASeries(closes, 9);
+    const series21 = calcEMASeries(closes, 21);
+    const series50 = calcEMASeries(closes, 50);
+    
+    // Isolated ATR
+    const atr = calcATR(candles, 14);
+    
+    if (!atr) {
+      return { type: 'NEUTRAL', strength: 0, reasons: ['Insufficient data for ATR'] };
     }
     
-    // No cascade and no momentum
-    if (cascadeResult.score < 30 && momentumScore < 30) {
-      return {
-        type: 'NEUTRAL',
-        strength: 0,
-        reasons: ['No crossover cascade - waiting for momentum'],
+    // Analyze cascade
+    const cascade = analyzeCascade(series9, series21, series50, price);
+    
+    if (!cascade.direction || !cascade.aligned) {
+      return { type: 'NEUTRAL', strength: 0, reasons: ['No EMA alignment - waiting'] };
+    }
+    
+    // V2: Require cascade (not just single crossover)
+    if (!cascade.isCascade) {
+      return { 
+        type: 'NEUTRAL', 
+        strength: 0, 
+        reasons: [`Partial ${cascade.direction} signal - waiting for full cascade`] 
       };
     }
     
-    // Volume confirmation
-    let volumeBonus = 0;
-    if (volume.ratio >= 1.5) {
-      volumeBonus = 15;
-      reasons.push(`Volume confirmation: ${volume.ratio.toFixed(1)}x`);
+    // V2: Require fresh cascade (< 5 bars ago on average)
+    if (cascade.freshness < 40) {
+      return { 
+        type: 'NEUTRAL', 
+        strength: 0, 
+        reasons: [`Stale cascade (freshness ${cascade.freshness.toFixed(0)}%) - too late to enter`] 
+      };
     }
     
-    // Final score
-    const finalScore = (cascadeResult.score * 0.4) + (momentumScore * 0.3) + (alignmentScore * 0.3) + volumeBonus;
+    const direction = cascade.direction;
+    const reasons: string[] = [];
+    let score = cascade.score;
+    
+    reasons.push(`${direction === 'bull' ? '📈' : '📉'} ${direction.toUpperCase()} cascade confirmed`);
+    reasons.push(`Freshness: ${cascade.freshness.toFixed(0)}%`);
+    
+    // Momentum confirmation
+    const momentum = checkMomentum(series9, series21, direction);
+    
+    if (momentum < 40) {
+      score -= 15;
+      reasons.push('⚠️ Weak momentum');
+    } else if (momentum >= 70) {
+      score += 10;
+      reasons.push('✓ Strong momentum');
+    }
+    
+    // Volume check (from shared indicators since we're checking, not calculating)
+    const volumes = candles.slice(-21, -1).map(c => c.volume);
+    const avgVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+    const currentVolume = candles[candles.length - 1].volume;
+    const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
+    
+    if (volumeRatio >= 1.3) {
+      score += 10;
+      reasons.push(`Volume: ${volumeRatio.toFixed(1)}x`);
+    }
+    
+    // ============================================
+    // SIGNAL GENERATION WITH FIXED R:R
+    // ============================================
     
     let signal: SignalType = 'NEUTRAL';
     let stop: number | undefined;
     let target: number | undefined;
     
-    const ema21 = emas.values[21];
-    const ema50 = emas.values[50];
-    
-    if (finalScore >= 70 && cascadeResult.isCascade) {
-      signal = direction === 'bull' ? 'STRONG_LONG' : 'STRONG_SHORT';
-      if (ema21) stop = direction === 'bull' ? ema21 * 0.98 : ema21 * 1.02;
-      target = direction === 'bull' ? price * 1.06 : price * 0.94;
-    } else if (finalScore >= 50) {
-      signal = direction === 'bull' ? 'LONG' : 'SHORT';
-      if (ema50) stop = direction === 'bull' ? ema50 * 0.98 : ema50 * 1.02;
-      target = direction === 'bull' ? price * 1.04 : price * 0.96;
+    if (score >= 60) {
+      signal = score >= 80 
+        ? (direction === 'bull' ? 'STRONG_LONG' : 'STRONG_SHORT')
+        : (direction === 'bull' ? 'LONG' : 'SHORT');
+      
+      // V2: ATR-based stop (consistent risk)
+      const stopDistance = atr * 1.5;
+      
+      if (direction === 'bull') {
+        stop = price - stopDistance;
+        // V2: Target = 1.5x risk (guaranteed positive R:R)
+        target = price + (stopDistance * 1.5);
+      } else {
+        stop = price + stopDistance;
+        target = price - (stopDistance * 1.5);
+      }
+      
+      const rr = Math.abs(target - price) / Math.abs(price - stop);
+      reasons.push(`R:R ${rr.toFixed(1)}:1`);
     }
     
     return {
       type: signal,
-      strength: Math.round(finalScore),
-      entry: price,
+      strength: Math.min(Math.max(score, 0), 100),
+      entry: signal !== 'NEUTRAL' ? price : undefined,
       stop,
       target,
       reasons,
