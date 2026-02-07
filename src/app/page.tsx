@@ -466,6 +466,9 @@ export default function Dashboard() {
           if (strategy.signal.type === 'NEUTRAL') continue;
           if (!strategy.signal.entry || !strategy.signal.stop || !strategy.signal.target) continue;
           
+          // Only track HIGH CONFIDENCE signals (70%+)
+          if (strategy.signal.strength < 70) continue;
+          
           // Create unique key for this signal
           const signalKey = `${crypto.symbol}-${strategy.id}-${strategy.signal.type}`;
           
