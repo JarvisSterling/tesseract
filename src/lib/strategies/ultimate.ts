@@ -1,16 +1,15 @@
 /**
- * Ultimate Strategy - Multi-Strategy Confluence
+ * Ultimate Strategy V2 - Weighted Confluence
  * 
- * CONCEPT:
- * - Run ALL other strategies simultaneously
- * - Only trade when 5+ strategies agree on direction
- * - Use the best stop/target from agreeing strategies
- * - Fewer trades, much higher win rate
+ * PROBLEM WITH V1:
+ * - Required 3-5 strategies to agree on same candle
+ * - This is too rare - strategies trigger at different times
  * 
- * EXPECTED:
- * - 50-100 trades per year (vs 2000+)
- * - 60-80% win rate (vs 30-35%)
- * - High conviction setups only
+ * V2 APPROACH - Weighted Voting:
+ * - Each strategy vote is weighted by its historical performance
+ * - Better strategies get more voting power
+ * - Signal when weighted score exceeds threshold
+ * - Much more signals while still being selective
  */
 
 import { Strategy, StrategyInput, StrategySignal, SignalType } from './types';
@@ -26,6 +25,20 @@ import { crossoverCascade } from './crossover-cascade';
 import { dynamicBounce } from './dynamic-bounce';
 import { volumeBreakout } from './volume-breakout';
 
+// Strategy weights based on backtest P&L performance
+// Higher performing strategies get more weight
+const STRATEGY_WEIGHTS: Record<string, number> = {
+  'macd-momentum': 3.5,      // +353% P&L - top performer
+  'bollinger-squeeze': 2.7,  // +272% P&L
+  'ribbon-rider': 1.6,       // +158% P&L
+  'mean-reversion': 0.75,    // +74% P&L
+  'divergence-hunter': 0.75, // +74% P&L
+  'compression-cannon': 0.2, // +20% P&L but few trades
+  'crossover-cascade': 0.2,  // +18% P&L
+  'dynamic-bounce': 0.15,    // +15% P&L
+  'volume-breakout': 0.1,    // +10% P&L
+};
+
 // All strategies to evaluate
 const ALL_STRATEGIES = [
   macdMomentum,
@@ -39,20 +52,18 @@ const ALL_STRATEGIES = [
   volumeBreakout,
 ];
 
-// Minimum strategies that must agree
-const MIN_CONFLUENCE = 3;  // Need at least 3 strategies to agree
-
-// Strong signal threshold  
-const STRONG_CONFLUENCE = 5;  // 5+ is a very strong setup
+// Thresholds
+const SIGNAL_THRESHOLD = 3.0;    // Weighted score needed to trigger
+const STRONG_THRESHOLD = 5.0;    // Score for strong signal
 
 interface StrategyVote {
   strategyId: string;
   strategyName: string;
   direction: 'long' | 'short' | 'neutral';
   strength: number;
+  weight: number;
   stop?: number;
   target?: number;
-  reasons: string[];
 }
 
 function getDirection(signal: SignalType): 'long' | 'short' | 'neutral' {
@@ -64,64 +75,77 @@ function getDirection(signal: SignalType): 'long' | 'short' | 'neutral' {
 export const ultimateStrategy: Strategy = {
   id: 'ultimate',
   name: 'Ultimate Strategy',
-  description: 'Multi-strategy confluence - trades only when 5+ strategies agree',
+  description: 'V2: Weighted confluence - top strategies have more voting power',
   category: 'confluence',
   timeframes: ['1h', '4h'],
   
   evaluate: (input: StrategyInput): StrategySignal => {
     const { price } = input;
     
-    // Collect votes from all strategies
+    // Collect weighted votes from all strategies
     const votes: StrategyVote[] = [];
     
     for (const strategy of ALL_STRATEGIES) {
       try {
         const signal = strategy.evaluate(input);
         const direction = getDirection(signal.type);
+        const weight = STRATEGY_WEIGHTS[strategy.id] || 1;
         
         votes.push({
           strategyId: strategy.id,
           strategyName: strategy.name,
           direction,
           strength: signal.strength,
+          weight,
           stop: signal.stop,
           target: signal.target,
-          reasons: signal.reasons,
         });
       } catch (e) {
         // Skip failed strategies
-        console.error(`Strategy ${strategy.id} failed:`, e);
       }
     }
     
-    // Count votes by direction
-    const longVotes = votes.filter(v => v.direction === 'long');
-    const shortVotes = votes.filter(v => v.direction === 'short');
-    const neutralVotes = votes.filter(v => v.direction === 'neutral');
+    // Calculate weighted scores
+    let longScore = 0;
+    let shortScore = 0;
+    const longVotes: StrategyVote[] = [];
+    const shortVotes: StrategyVote[] = [];
     
-    const longCount = longVotes.length;
-    const shortCount = shortVotes.length;
+    for (const vote of votes) {
+      // Weight the vote by strategy performance AND signal strength
+      const effectiveWeight = vote.weight * (vote.strength / 100);
+      
+      if (vote.direction === 'long') {
+        longScore += effectiveWeight;
+        longVotes.push(vote);
+      } else if (vote.direction === 'short') {
+        shortScore += effectiveWeight;
+        shortVotes.push(vote);
+      }
+    }
     
-    // Build reasons
     const reasons: string[] = [];
-    reasons.push(`📊 Confluence: ${longCount} LONG | ${shortCount} SHORT | ${neutralVotes.length} neutral`);
+    reasons.push(`📊 Weighted: LONG ${longScore.toFixed(1)} | SHORT ${shortScore.toFixed(1)}`);
     
-    // Check for confluence
+    // Determine direction based on weighted score
     let finalDirection: 'long' | 'short' | null = null;
     let agreeing: StrategyVote[] = [];
+    let score = 0;
     
-    if (longCount >= MIN_CONFLUENCE && longCount > shortCount) {
+    if (longScore >= SIGNAL_THRESHOLD && longScore > shortScore * 1.5) {
       finalDirection = 'long';
       agreeing = longVotes;
-      reasons.push(`✅ ${longCount} strategies agree on LONG`);
-    } else if (shortCount >= MIN_CONFLUENCE && shortCount > longCount) {
+      score = longScore;
+      reasons.push(`✅ LONG confirmed (${longVotes.length} strategies)`);
+    } else if (shortScore >= SIGNAL_THRESHOLD && shortScore > longScore * 1.5) {
       finalDirection = 'short';
       agreeing = shortVotes;
-      reasons.push(`✅ ${shortCount} strategies agree on SHORT`);
+      score = shortScore;
+      reasons.push(`✅ SHORT confirmed (${shortVotes.length} strategies)`);
     } else {
-      // Not enough confluence
-      if (longCount > 0 || shortCount > 0) {
-        reasons.push(`⏳ Need ${MIN_CONFLUENCE}+ to agree (waiting)`);
+      // Not enough conviction
+      if (longScore > 0 || shortScore > 0) {
+        reasons.push(`⏳ Need >${SIGNAL_THRESHOLD} weighted score`);
       }
       return {
         type: 'NEUTRAL',
@@ -130,79 +154,68 @@ export const ultimateStrategy: Strategy = {
       };
     }
     
-    // List agreeing strategies
-    const agreeingNames = agreeing.map(v => v.strategyName).join(', ');
-    reasons.push(`Agreeing: ${agreeingNames}`);
+    // List top contributing strategies
+    const topContributors = agreeing
+      .sort((a, b) => b.weight * b.strength - a.weight * a.strength)
+      .slice(0, 3)
+      .map(v => v.strategyName);
+    reasons.push(`Top: ${topContributors.join(', ')}`);
     
-    // Calculate best stop (tightest = closest to entry)
+    // Calculate stop from agreeing strategies (use tightest)
     const stopsWithValue = agreeing.filter(v => v.stop !== undefined);
     let bestStop: number | undefined;
     
     if (stopsWithValue.length > 0) {
       if (finalDirection === 'long') {
-        // For long, tightest stop is the highest (closest to entry)
         bestStop = Math.max(...stopsWithValue.map(v => v.stop!));
       } else {
-        // For short, tightest stop is the lowest (closest to entry)
         bestStop = Math.min(...stopsWithValue.map(v => v.stop!));
       }
     }
     
-    // Calculate best target (most conservative = closest to entry)
+    // Calculate target (use most conservative)
     const targetsWithValue = agreeing.filter(v => v.target !== undefined);
     let bestTarget: number | undefined;
     
     if (targetsWithValue.length > 0) {
       if (finalDirection === 'long') {
-        // For long, conservative target is the lowest
         bestTarget = Math.min(...targetsWithValue.map(v => v.target!));
       } else {
-        // For short, conservative target is the highest
         bestTarget = Math.max(...targetsWithValue.map(v => v.target!));
       }
     }
     
-    // Ensure minimum R:R of 1.5:1
+    // Ensure minimum R:R
     if (bestStop && bestTarget) {
       const risk = Math.abs(price - bestStop);
       const reward = Math.abs(bestTarget - price);
       const rr = reward / risk;
       
       if (rr < 1.5) {
-        // Adjust target to maintain 1.5:1
         if (finalDirection === 'long') {
           bestTarget = price + (risk * 1.5);
         } else {
           bestTarget = price - (risk * 1.5);
         }
-        reasons.push(`R:R adjusted to 1.5:1`);
-      } else {
-        reasons.push(`R:R ${rr.toFixed(1)}:1`);
       }
+      reasons.push(`R:R ${(Math.abs(bestTarget - price) / Math.abs(price - bestStop)).toFixed(1)}:1`);
     }
     
-    // Calculate strength based on confluence level
-    const confluenceCount = agreeing.length;
-    const avgStrength = agreeing.reduce((sum, v) => sum + v.strength, 0) / agreeing.length;
-    
-    // Score: base on confluence count + average strength
-    let score = 50;
-    score += (confluenceCount - MIN_CONFLUENCE) * 10;  // +10 per extra strategy
-    score += avgStrength * 0.3;  // Boost from individual strengths
-    score = Math.min(score, 100);
+    // Normalize score to 0-100
+    const normalizedStrength = Math.min(Math.round((score / 10) * 100), 100);
     
     // Determine signal type
     let signalType: SignalType;
-    if (confluenceCount >= STRONG_CONFLUENCE) {
+    if (score >= STRONG_THRESHOLD) {
       signalType = finalDirection === 'long' ? 'STRONG_LONG' : 'STRONG_SHORT';
-      reasons.push(`🔥 STRONG signal (${confluenceCount} strategies)`);
+      reasons.push(`🔥 HIGH conviction (${score.toFixed(1)})`);
     } else {
       signalType = finalDirection === 'long' ? 'LONG' : 'SHORT';
     }
     
     return {
       type: signalType,
-      strength: score,
+      strength: normalizedStrength,
       entry: price,
       stop: bestStop,
       target: bestTarget,
