@@ -40,10 +40,10 @@ const ALL_STRATEGIES = [
 ];
 
 // Minimum strategies that must agree
-const MIN_CONFLUENCE = 5;
+const MIN_CONFLUENCE = 4;  // Lowered from 5 - still selective but generates more signals
 
 // Strong signal threshold
-const STRONG_CONFLUENCE = 7;
+const STRONG_CONFLUENCE = 6;  // Lowered from 7
 
 interface StrategyVote {
   strategyId: string;
