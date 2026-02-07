@@ -739,6 +739,9 @@ export default function Dashboard() {
           <SignalsTab 
             signals={trackedSignals} 
             onClearSignals={handleClearSignals}
+            currentPrices={Object.fromEntries(
+              Object.entries(wsPrices).map(([symbol, data]) => [symbol, data.price])
+            )}
           />
         </div>
       )}

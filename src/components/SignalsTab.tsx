@@ -15,6 +15,7 @@ import {
 interface SignalsTabProps {
   signals: TrackedSignal[];
   onClearSignals: () => void;
+  currentPrices?: Record<string, number>;  // symbol -> current price
 }
 
 type FilterMode = 'all' | 'open' | 'wins' | 'losses';
@@ -44,10 +45,23 @@ function formatDuration(openedAt: number, closedAt?: number): string {
   return `${minutes}m`;
 }
 
-function SignalRow({ signal }: { signal: TrackedSignal }) {
+function SignalRow({ signal, currentPrice }: { signal: TrackedSignal; currentPrice?: number }) {
   const isLong = signal.type.includes('LONG');
   const isStrong = signal.type.includes('STRONG');
   const isOpen = signal.status === 'OPEN';
+  
+  // Calculate live P&L for open positions
+  let displayPnl = signal.pnlPercent;
+  let isLivePnl = false;
+  
+  if (isOpen && currentPrice && signal.entry) {
+    isLivePnl = true;
+    if (isLong) {
+      displayPnl = ((currentPrice - signal.entry) / signal.entry) * 100;
+    } else {
+      displayPnl = ((signal.entry - currentPrice) / signal.entry) * 100;
+    }
+  }
   
   return (
     <tr className={`
@@ -113,13 +127,18 @@ function SignalRow({ signal }: { signal: TrackedSignal }) {
       
       {/* P&L */}
       <td className="py-2 px-2 text-right">
-        {signal.pnlPercent !== undefined ? (
-          <span className={`
-            text-[11px] font-mono font-bold
-            ${signal.pnlPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}
-          `}>
-            {signal.pnlPercent >= 0 ? '+' : ''}{signal.pnlPercent.toFixed(2)}%
-          </span>
+        {displayPnl !== undefined ? (
+          <div className="flex items-center justify-end gap-1">
+            {isLivePnl && (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" title="Live" />
+            )}
+            <span className={`
+              text-[11px] font-mono font-bold
+              ${displayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}
+            `}>
+              {displayPnl >= 0 ? '+' : ''}{displayPnl.toFixed(2)}%
+            </span>
+          </div>
         ) : (
           <span className="text-[10px] text-zinc-500">—</span>
         )}
@@ -195,7 +214,7 @@ function StrategyStatsCard({ stats }: { stats: StrategyStats }) {
   );
 }
 
-export function SignalsTab({ signals, onClearSignals }: SignalsTabProps) {
+export function SignalsTab({ signals, onClearSignals, currentPrices = {} }: SignalsTabProps) {
   const [filter, setFilter] = useState<FilterMode>('all');
   const [sort, setSort] = useState<{ field: SortField; dir: 'asc' | 'desc' }>({ 
     field: 'time', 
@@ -366,7 +385,11 @@ export function SignalsTab({ signals, onClearSignals }: SignalsTabProps) {
               </thead>
               <tbody>
                 {filteredSignals.map(signal => (
-                  <SignalRow key={signal.id} signal={signal} />
+                  <SignalRow 
+                    key={signal.id} 
+                    signal={signal} 
+                    currentPrice={currentPrices[signal.symbol]}
+                  />
                 ))}
               </tbody>
             </table>
