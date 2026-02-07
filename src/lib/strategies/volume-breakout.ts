@@ -132,21 +132,22 @@ export const volumeBreakout: Strategy = {
     const direction = priceBreakout.direction;
     reasons.push(`${direction === 'up' ? '📈' : '📉'} ${priceBreakout.direction?.toUpperCase()} breakout detected`);
     
-    // V2: REQUIRE minimum volume (no low-volume breakouts at all)
-    if (volumeAnalysis.volumeRatio < 1.5) {
-      return { type: 'NEUTRAL', strength: 0, reasons: ['Volume too low for valid breakout'] };
-    }
+    // Base score for breakout
+    score += 25;
     
-    // Base score for breakout + volume confirmation
-    score += 30;
-    
-    // Volume is KEY - but now we already filtered weak volume
+    // Volume is KEY
     if (volumeAnalysis.volumeSpike) {
-      score += 30;
+      score += 35;
       reasons.push(`🔥 Volume SPIKE: ${volumeAnalysis.volumeRatio.toFixed(1)}x average`);
+    } else if (volumeAnalysis.volumeRatio >= 1.5) {
+      score += 20;
+      reasons.push(`Volume elevated: ${volumeAnalysis.volumeRatio.toFixed(1)}x average`);
+    } else if (volumeAnalysis.volumeRatio >= 1.2) {
+      score += 10;
+      reasons.push(`Volume above average: ${volumeAnalysis.volumeRatio.toFixed(1)}x`);
     } else {
-      score += 15;
-      reasons.push(`Volume confirmed: ${volumeAnalysis.volumeRatio.toFixed(1)}x average`);
+      score -= 10;
+      reasons.push('⚠️ Low volume breakout - reduced conviction');
     }
     
     // Increasing volume pattern
@@ -155,21 +156,13 @@ export const volumeBreakout: Strategy = {
       reasons.push('Volume building (3 increasing bars)');
     }
     
-    // V5: REQUIRE strong close position (conviction)
-    if (direction === 'up') {
-      if (priceBreakout.closePosition >= 0.70) {
-        score += 15;
-        reasons.push('✓ Strong close near highs');
-      } else {
-        return { type: 'NEUTRAL', strength: 0, reasons: ['Weak close - no conviction'] };
-      }
-    } else {
-      if (priceBreakout.closePosition <= 0.30) {
-        score += 15;
-        reasons.push('✓ Strong close near lows');
-      } else {
-        return { type: 'NEUTRAL', strength: 0, reasons: ['Weak close - no conviction'] };
-      }
+    // Candle close position (conviction)
+    if (direction === 'up' && priceBreakout.closePosition >= 0.75) {
+      score += 10;
+      reasons.push('Strong close near highs');
+    } else if (direction === 'down' && priceBreakout.closePosition <= 0.25) {
+      score += 10;
+      reasons.push('Strong close near lows');
     }
     
     // Momentum confirmation
@@ -181,30 +174,16 @@ export const volumeBreakout: Strategy = {
       reasons.push(`Momentum: ${momentum.toFixed(1)}%`);
     }
     
-    // V5: REQUIRE EMA alignment (no counter-trend breakouts)
+    // EMA alignment
     const ema21 = emas.values[21];
     const ema50 = emas.values[50];
     if (ema21 && ema50) {
-      if (direction === 'up') {
-        if (price > ema21 && ema21 > ema50) {
-          score += 15;
-          reasons.push('✓ Trend aligned (EMAs bullish)');
-        } else if (price > ema21) {
-          score += 5;
-          reasons.push('Price above EMA21');
-        } else {
-          return { type: 'NEUTRAL', strength: 0, reasons: ['Counter-trend breakout - skipping'] };
-        }
-      } else {
-        if (price < ema21 && ema21 < ema50) {
-          score += 15;
-          reasons.push('✓ Trend aligned (EMAs bearish)');
-        } else if (price < ema21) {
-          score += 5;
-          reasons.push('Price below EMA21');
-        } else {
-          return { type: 'NEUTRAL', strength: 0, reasons: ['Counter-trend breakout - skipping'] };
-        }
+      if (direction === 'up' && price > ema21 && price > ema50) {
+        score += 10;
+        reasons.push('Price above key EMAs');
+      } else if (direction === 'down' && price < ema21 && price < ema50) {
+        score += 10;
+        reasons.push('Price below key EMAs');
       }
     }
     
@@ -230,22 +209,20 @@ export const volumeBreakout: Strategy = {
     
     const atrStop = atr ? atr * 1.2 : price * 0.015; // Tighter stop for breakouts
     
-    // V4: Higher threshold for better win rate
-    if (score >= 60) {
-      signal = score >= 80 
+    if (score >= 50) {
+      signal = score >= 75 
         ? (direction === 'up' ? 'STRONG_LONG' : 'STRONG_SHORT')
         : (direction === 'up' ? 'LONG' : 'SHORT');
       
-      // V4: Better R:R (3:1) for breakout trades
       if (direction === 'up') {
         // Stop below breakout level
         const breakoutLevel = Math.max(...candles.slice(-21, -1).map(c => c.high));
         stop = Math.max(breakoutLevel * 0.995, price - atrStop);
-        target = price + (atrStop * 3.0); // 3:1 R:R for breakouts
+        target = price + (atrStop * 2.5);
       } else {
         const breakoutLevel = Math.min(...candles.slice(-21, -1).map(c => c.low));
         stop = Math.min(breakoutLevel * 1.005, price + atrStop);
-        target = price - (atrStop * 3.0); // 3:1 R:R for breakouts
+        target = price - (atrStop * 2.5);
       }
     }
     

@@ -144,37 +144,23 @@ function calculateConfirmationScore(
   divergence: DivergenceResult,
   rsi: number | null,
   volumeRatio: number
-): { score: number; rsiConfirmed: boolean } {
-  if (!divergence.type) return { score: 0, rsiConfirmed: false };
+): number {
+  if (!divergence.type) return 0;
   
   let score = divergence.strength;
-  let rsiConfirmed = false;
   
-  // V5: RSI MUST be at extremes for regular divergences (key filter)
+  // RSI at extremes confirms divergence
   if (rsi !== null) {
-    if (divergence.type === 'bearish' && rsi > 65) {
-      score += 20;
-      rsiConfirmed = true;
-    }
-    if (divergence.type === 'bullish' && rsi < 35) {
-      score += 20;
-      rsiConfirmed = true;
-    }
-    // Hidden divergences are trend continuation - RSI in middle is fine
-    if (divergence.type === 'hidden_bearish' && rsi > 40 && rsi < 70) {
-      score += 15;
-      rsiConfirmed = true;
-    }
-    if (divergence.type === 'hidden_bullish' && rsi > 30 && rsi < 60) {
-      score += 15;
-      rsiConfirmed = true;
-    }
+    if (divergence.type === 'bearish' && rsi > 70) score += 15;
+    if (divergence.type === 'bullish' && rsi < 30) score += 15;
+    if (divergence.type === 'hidden_bearish' && rsi > 50 && rsi < 70) score += 10;
+    if (divergence.type === 'hidden_bullish' && rsi > 30 && rsi < 50) score += 10;
   }
   
   // Volume declining on divergence is classic confirmation
   if (volumeRatio < 0.8) score += 10;
   
-  return { score: Math.min(score, 100), rsiConfirmed };
+  return Math.min(score, 100);
 }
 
 export const divergenceHunter: Strategy = {
@@ -214,23 +200,14 @@ export const divergenceHunter: Strategy = {
       };
     }
     
-    const { score: confirmationScore, rsiConfirmed } = calculateConfirmationScore(divergence, rsi, volume.ratio);
-    
-    // V5: REQUIRE RSI confirmation for regular divergences
-    if (!rsiConfirmed && (divergence.type === 'bullish' || divergence.type === 'bearish')) {
-      return {
-        type: 'NEUTRAL',
-        strength: 0,
-        reasons: [`Divergence detected but RSI (${rsi?.toFixed(0) || '?'}) not extreme enough`],
-      };
-    }
+    const confirmationScore = calculateConfirmationScore(divergence, rsi, volume.ratio);
     
     const reasons: string[] = [];
     reasons.push(divergence.description);
     
     if (rsi !== null) {
-      if (rsi > 65) reasons.push(`RSI overbought (${rsi.toFixed(0)})`);
-      if (rsi < 35) reasons.push(`RSI oversold (${rsi.toFixed(0)})`);
+      if (rsi > 70) reasons.push(`RSI overbought (${rsi.toFixed(0)})`);
+      if (rsi < 30) reasons.push(`RSI oversold (${rsi.toFixed(0)})`);
     }
     
     let signal: SignalType = 'NEUTRAL';
@@ -239,19 +216,20 @@ export const divergenceHunter: Strategy = {
     
     const ema21 = emas.values[21];
     
-    // V5: ATR-based stops with minimum 2:1 R:R (improved from 1.5:1)
+    // V4 FIX: Use ATR-based stops with minimum 1.5:1 R:R
+    // Key insight: keep original detection (57% win rate), just fix levels
     const atrValue = atr || price * 0.02;
     
-    if (confirmationScore >= 75) {
+    if (confirmationScore >= 70) {
       if (divergence.type === 'bullish' || divergence.type === 'hidden_bullish') {
         signal = confirmationScore >= 85 ? 'STRONG_LONG' : 'LONG';
         
         // Stop: 1.5x ATR below entry (gives room to breathe)
         stop = price - (atrValue * 1.5);
         
-        // V5: Target at least 2x the stop distance (better R:R)
+        // Target: At least 1.5x the stop distance (guaranteed positive R:R)
         const stopDistance = price - stop;
-        const minTarget = price + (stopDistance * 2.0);
+        const minTarget = price + (stopDistance * 1.5);
         
         // If EMA21 is higher, use that; otherwise use min target
         if (ema21 && ema21 > minTarget) {
@@ -266,9 +244,9 @@ export const divergenceHunter: Strategy = {
         // Stop: 1.5x ATR above entry
         stop = price + (atrValue * 1.5);
         
-        // V5: Target at least 2x the stop distance (better R:R)
+        // Target: At least 1.5x the stop distance
         const stopDistance = stop - price;
-        const minTarget = price - (stopDistance * 2.0);
+        const minTarget = price - (stopDistance * 1.5);
         
         // If EMA21 is lower, use that; otherwise use min target
         if (ema21 && ema21 < minTarget) {
@@ -277,16 +255,16 @@ export const divergenceHunter: Strategy = {
           target = minTarget;
         }
       }
-    } else if (confirmationScore >= 60) {
-      // V5: Require higher score for weaker signals, still 2:1 R:R
+    } else if (confirmationScore >= 50) {
+      // Weaker signal - tighter stops, smaller targets
       if (divergence.type === 'bullish' || divergence.type === 'hidden_bullish') {
         signal = 'LONG';
         stop = price - (atrValue * 1.2);
-        target = price + (atrValue * 2.4); // 2:1 R:R
+        target = price + (atrValue * 1.8); // 1.5:1 R:R
       } else {
         signal = 'SHORT';
         stop = price + (atrValue * 1.2);
-        target = price - (atrValue * 2.4); // 2:1 R:R
+        target = price - (atrValue * 1.8); // 1.5:1 R:R
       }
     }
     

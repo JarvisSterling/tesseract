@@ -37,8 +37,8 @@ export const meanReversion: Strategy = {
     const deviation = ((price - ema21) / ema21) * 100;
     const absDeviation = Math.abs(deviation);
     
-    // V7: 2.5% threshold (balance between signal quality and quantity)
-    if (absDeviation < 2.5) {
+    // V5: Lower threshold to 2% to generate more signals
+    if (absDeviation < 2.0) {
       return { type: 'NEUTRAL', strength: 0, reasons: ['Price within normal range'] };
     }
     
@@ -67,39 +67,34 @@ export const meanReversion: Strategy = {
     // Extension score (more extension = more potential snap back)
     score += Math.min(absDeviation * 10, 30);
     
-    // V6: RSI MUST be extreme - this is the key filter
-    if (rsi === null) {
-      return { type: 'NEUTRAL', strength: 0, reasons: ['Need RSI data'] };
-    }
-    
-    // V8: RSI tiered scoring with broader acceptance
-    if (isOversold) {
-      if (rsi >= 40) {
-        return { type: 'NEUTRAL', strength: 0, reasons: [`RSI ${rsi.toFixed(0)} not oversold enough`] };
-      }
-      if (rsi < 20) {
-        score += 45;
-        reasons.push(`🔥 RSI extremely oversold (${rsi.toFixed(0)})`);
-      } else if (rsi < 30) {
-        score += 35;
-        reasons.push(`RSI oversold (${rsi.toFixed(0)})`);
+    // RSI is the key for mean reversion
+    if (rsi !== null) {
+      if (isOversold) {
+        if (rsi < 20) {
+          score += 35;
+          reasons.push(`RSI extremely oversold (${rsi.toFixed(0)})`);
+        } else if (rsi < 30) {
+          score += 25;
+          reasons.push(`RSI oversold (${rsi.toFixed(0)})`);
+        } else if (rsi < 40) {
+          score += 15;
+          reasons.push(`RSI low (${rsi.toFixed(0)})`);
+        } else if (rsi < 50) {
+          score += 5;
+        }
       } else {
-        score += 20;
-        reasons.push(`RSI low (${rsi.toFixed(0)})`);
-      }
-    } else {
-      if (rsi <= 60) {
-        return { type: 'NEUTRAL', strength: 0, reasons: [`RSI ${rsi.toFixed(0)} not overbought enough`] };
-      }
-      if (rsi > 80) {
-        score += 45;
-        reasons.push(`🔥 RSI extremely overbought (${rsi.toFixed(0)})`);
-      } else if (rsi > 70) {
-        score += 35;
-        reasons.push(`RSI overbought (${rsi.toFixed(0)})`);
-      } else {
-        score += 20;
-        reasons.push(`RSI high (${rsi.toFixed(0)})`);
+        if (rsi > 80) {
+          score += 35;
+          reasons.push(`RSI extremely overbought (${rsi.toFixed(0)})`);
+        } else if (rsi > 70) {
+          score += 25;
+          reasons.push(`RSI overbought (${rsi.toFixed(0)})`);
+        } else if (rsi > 60) {
+          score += 15;
+          reasons.push(`RSI high (${rsi.toFixed(0)})`);
+        } else if (rsi > 50) {
+          score += 5;
+        }
       }
     }
     
@@ -145,22 +140,22 @@ export const meanReversion: Strategy = {
       }
     }
     
-    // V7: Reversal candle is strong bonus (not required - RSI extreme is key)
+    // Check for reversal candle pattern (bonus, not required)
     if (candles.length >= 2) {
       const current = candles[candles.length - 1];
       const prev = candles[candles.length - 2];
       const currentBody = current.close - current.open;
       const prevBody = prev.close - prev.open;
       
-      // Bullish reversal candle bonus
+      // Bullish reversal after red
       if (isOversold && currentBody > 0 && prevBody < 0) {
-        score += 20;
-        reasons.push('✓ Bullish reversal candle');
+        score += 10;
+        reasons.push('Bullish candle forming');
       }
-      // Bearish reversal candle bonus
+      // Bearish reversal after green
       if (isOverbought && currentBody < 0 && prevBody > 0) {
-        score += 20;
-        reasons.push('✓ Bearish reversal candle');
+        score += 10;
+        reasons.push('Bearish candle forming');
       }
     }
     
