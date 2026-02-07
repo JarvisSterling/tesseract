@@ -56,9 +56,9 @@ async function analyze() {
   console.log('🔬 TESSERACT STRATEGY ANALYSIS\n');
   console.log('='.repeat(60));
   
-  // Compare 180d vs 365d
+  // Run 365d backtest
   const symbols = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP'];
-  const days = 180;
+  const days = 365;
   console.log(`\n📊 Running ${days}-day backtest on: ${symbols.join(', ')}\n`);
   
   const results = await runBacktest(symbols, days);
