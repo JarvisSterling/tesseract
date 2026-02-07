@@ -111,6 +111,21 @@ function SignalRow({ signal, currentPrice, allPrices }: { signal: TrackedSignal;
         <span className="text-[10px] text-zinc-400">{signal.strategyName}</span>
       </td>
       
+      {/* Confidence */}
+      <td className="py-2 px-2 text-center">
+        <span className={`
+          text-[10px] font-mono font-bold px-1.5 py-0.5 rounded
+          ${signal.strength >= 70 
+            ? 'bg-emerald-500/20 text-emerald-400' 
+            : signal.strength >= 50 
+              ? 'bg-amber-500/20 text-amber-400' 
+              : 'bg-zinc-500/20 text-zinc-400'
+          }
+        `}>
+          {signal.strength}%
+        </span>
+      </td>
+      
       {/* Entry */}
       <td className="py-2 px-2 text-right">
         <span className="text-[10px] font-mono text-zinc-300">
@@ -392,6 +407,7 @@ export function SignalsTab({ signals, onClearSignals, currentPrices = {} }: Sign
                   <th className="text-left py-2 px-2 w-8"></th>
                   <th className="text-left py-2 px-2 text-[10px] text-zinc-500 font-semibold">Asset</th>
                   <th className="text-left py-2 px-2 text-[10px] text-zinc-500 font-semibold">Strategy</th>
+                  <th className="text-center py-2 px-2 text-[10px] text-zinc-500 font-semibold">Conf</th>
                   <th className="text-right py-2 px-2 text-[10px] text-zinc-500 font-semibold">Entry</th>
                   <th className="text-right py-2 px-2 text-[10px] text-zinc-500 font-semibold">Stop</th>
                   <th className="text-right py-2 px-2 text-[10px] text-zinc-500 font-semibold">Target</th>
