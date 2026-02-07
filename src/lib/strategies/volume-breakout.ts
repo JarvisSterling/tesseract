@@ -155,13 +155,21 @@ export const volumeBreakout: Strategy = {
       reasons.push('Volume building (3 increasing bars)');
     }
     
-    // Candle close position (conviction)
-    if (direction === 'up' && priceBreakout.closePosition >= 0.75) {
-      score += 10;
-      reasons.push('Strong close near highs');
-    } else if (direction === 'down' && priceBreakout.closePosition <= 0.25) {
-      score += 10;
-      reasons.push('Strong close near lows');
+    // V5: REQUIRE strong close position (conviction)
+    if (direction === 'up') {
+      if (priceBreakout.closePosition >= 0.70) {
+        score += 15;
+        reasons.push('✓ Strong close near highs');
+      } else {
+        return { type: 'NEUTRAL', strength: 0, reasons: ['Weak close - no conviction'] };
+      }
+    } else {
+      if (priceBreakout.closePosition <= 0.30) {
+        score += 15;
+        reasons.push('✓ Strong close near lows');
+      } else {
+        return { type: 'NEUTRAL', strength: 0, reasons: ['Weak close - no conviction'] };
+      }
     }
     
     // Momentum confirmation
@@ -173,25 +181,30 @@ export const volumeBreakout: Strategy = {
       reasons.push(`Momentum: ${momentum.toFixed(1)}%`);
     }
     
-    // V3: EMA alignment is strong bonus (helps win rate) but not required
+    // V5: REQUIRE EMA alignment (no counter-trend breakouts)
     const ema21 = emas.values[21];
     const ema50 = emas.values[50];
     if (ema21 && ema50) {
-      if (direction === 'up' && price > ema21 && ema21 > ema50) {
-        score += 20;
-        reasons.push('✓ Trend aligned (EMAs bullish)');
-      } else if (direction === 'down' && price < ema21 && ema21 < ema50) {
-        score += 20;
-        reasons.push('✓ Trend aligned (EMAs bearish)');
-      } else if (direction === 'up' && price > ema21) {
-        score += 10;
-        reasons.push('Price above EMA21');
-      } else if (direction === 'down' && price < ema21) {
-        score += 10;
-        reasons.push('Price below EMA21');
+      if (direction === 'up') {
+        if (price > ema21 && ema21 > ema50) {
+          score += 15;
+          reasons.push('✓ Trend aligned (EMAs bullish)');
+        } else if (price > ema21) {
+          score += 5;
+          reasons.push('Price above EMA21');
+        } else {
+          return { type: 'NEUTRAL', strength: 0, reasons: ['Counter-trend breakout - skipping'] };
+        }
       } else {
-        score -= 15;
-        reasons.push('⚠️ Counter-trend breakout');
+        if (price < ema21 && ema21 < ema50) {
+          score += 15;
+          reasons.push('✓ Trend aligned (EMAs bearish)');
+        } else if (price < ema21) {
+          score += 5;
+          reasons.push('Price below EMA21');
+        } else {
+          return { type: 'NEUTRAL', strength: 0, reasons: ['Counter-trend breakout - skipping'] };
+        }
       }
     }
     
