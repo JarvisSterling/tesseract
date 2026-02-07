@@ -1,11 +1,9 @@
 /**
- * Divergence Hunter Strategy - V2 (Fixed R:R)
+ * Divergence Hunter Strategy - V4
  * 
- * PROBLEM: V1 had 57% win rate but -6.91% P&L
- * - Avg win: +1.66% (too small)
- * - Avg loss: -2.23% (too big)
- * 
- * FIX: ATR-based stops + 2:1 R:R targets
+ * V1: 57% win rate, -6.91% P&L (detection good, R:R bad)
+ * V2-V3: Broke detection trying to fix R:R
+ * V4: Restore V1 detection, only fix stop/target levels
  */
 
 import { Strategy, StrategyInput, StrategySignal, SignalType, OHLCVData } from './types';
@@ -17,27 +15,33 @@ interface PeakTrough {
 
 function findRecentPeaks(data: number[], lookback: number = 20): PeakTrough[] {
   const peaks: PeakTrough[] = [];
+  
   for (let i = 2; i < Math.min(data.length, lookback); i++) {
     const idx = data.length - 1 - i;
     if (idx < 1) break;
+    
     if (data[idx] > data[idx - 1] && data[idx] > data[idx + 1]) {
       peaks.push({ value: data[idx], index: i });
       if (peaks.length >= 2) break;
     }
   }
+  
   return peaks;
 }
 
 function findRecentTroughs(data: number[], lookback: number = 20): PeakTrough[] {
   const troughs: PeakTrough[] = [];
+  
   for (let i = 2; i < Math.min(data.length, lookback); i++) {
     const idx = data.length - 1 - i;
     if (idx < 1) break;
+    
     if (data[idx] < data[idx - 1] && data[idx] < data[idx + 1]) {
       troughs.push({ value: data[idx], index: i });
       if (troughs.length >= 2) break;
     }
   }
+  
   return troughs;
 }
 
@@ -61,56 +65,74 @@ function detectDivergence(
   const slopePeaks = findRecentPeaks(slopeData);
   const slopeTroughs = findRecentTroughs(slopeData);
   
-  // Check for bullish divergence first (troughs)
+  // Need at least 2 peaks/troughs to compare
+  if (pricePeaks.length < 2 || slopePeaks.length < 2) {
+    // Check troughs for bullish divergence
+    if (priceTroughs.length >= 2 && slopeTroughs.length >= 2) {
+      const [recentPriceLow, prevPriceLow] = priceTroughs;
+      const [recentSlopeLow, prevSlopeLow] = slopeTroughs;
+      
+      // Regular bullish divergence: lower price low, higher slope low
+      if (recentPriceLow.value < prevPriceLow.value && 
+          recentSlopeLow.value > prevSlopeLow.value) {
+        const rsiBonus = (rsi !== null && rsi < 35) ? 20 : 0;
+        return {
+          type: 'bullish',
+          strength: 70 + rsiBonus,
+          description: 'Price lower low but momentum higher low'
+        };
+      }
+      
+      // Hidden bullish: higher price low, lower slope low
+      if (recentPriceLow.value > prevPriceLow.value && 
+          recentSlopeLow.value < prevSlopeLow.value) {
+        return {
+          type: 'hidden_bullish',
+          strength: 55,
+          description: 'Hidden bullish - trend continuation likely'
+        };
+      }
+    }
+    
+    return { type: null, strength: 0, description: 'No clear divergence pattern' };
+  }
+  
+  const [recentPriceHigh, prevPriceHigh] = pricePeaks;
+  const [recentSlopeHigh, prevSlopeHigh] = slopePeaks;
+  
+  // Regular bearish divergence: higher price high, lower slope high
+  if (recentPriceHigh.value > prevPriceHigh.value && 
+      recentSlopeHigh.value < prevSlopeHigh.value) {
+    const rsiBonus = (rsi !== null && rsi > 65) ? 20 : 0;
+    return {
+      type: 'bearish',
+      strength: 70 + rsiBonus,
+      description: 'Price higher high but momentum lower high'
+    };
+  }
+  
+  // Hidden bearish: lower price high, higher slope high
+  if (recentPriceHigh.value < prevPriceHigh.value && 
+      recentSlopeHigh.value > prevSlopeHigh.value) {
+    return {
+      type: 'hidden_bearish',
+      strength: 55,
+      description: 'Hidden bearish - downtrend continuation likely'
+    };
+  }
+  
+  // Also check troughs for bullish
   if (priceTroughs.length >= 2 && slopeTroughs.length >= 2) {
     const [recentPriceLow, prevPriceLow] = priceTroughs;
     const [recentSlopeLow, prevSlopeLow] = slopeTroughs;
     
-    // Regular bullish: lower price low, higher slope low
     if (recentPriceLow.value < prevPriceLow.value && 
         recentSlopeLow.value > prevSlopeLow.value) {
       const rsiBonus = (rsi !== null && rsi < 35) ? 20 : 0;
       return {
         type: 'bullish',
         strength: 70 + rsiBonus,
-        description: 'Bullish divergence: price lower low, momentum higher low'
-      };
-    }
-    
-    // Hidden bullish: higher price low, lower slope low
-    if (recentPriceLow.value > prevPriceLow.value && 
-        recentSlopeLow.value < prevSlopeLow.value) {
-      return {
-        type: 'hidden_bullish',
-        strength: 55,
-        description: 'Hidden bullish divergence (trend continuation)'
-      };
-    }
-  }
-  
-  // Check for bearish divergence (peaks)
-  if (pricePeaks.length >= 2 && slopePeaks.length >= 2) {
-    const [recentPriceHigh, prevPriceHigh] = pricePeaks;
-    const [recentSlopeHigh, prevSlopeHigh] = slopePeaks;
-    
-    // Regular bearish: higher price high, lower slope high
-    if (recentPriceHigh.value > prevPriceHigh.value && 
-        recentSlopeHigh.value < prevSlopeHigh.value) {
-      const rsiBonus = (rsi !== null && rsi > 65) ? 20 : 0;
-      return {
-        type: 'bearish',
-        strength: 70 + rsiBonus,
-        description: 'Bearish divergence: price higher high, momentum lower high'
-      };
-    }
-    
-    // Hidden bearish: lower price high, higher slope high
-    if (recentPriceHigh.value < prevPriceHigh.value && 
-        recentSlopeHigh.value > prevSlopeHigh.value) {
-      return {
-        type: 'hidden_bearish',
-        strength: 55,
-        description: 'Hidden bearish divergence (trend continuation)'
+        description: 'Price lower low but momentum higher low'
       };
     }
   }
@@ -118,10 +140,33 @@ function detectDivergence(
   return { type: null, strength: 0, description: 'No divergence detected' };
 }
 
+function calculateConfirmationScore(
+  divergence: DivergenceResult,
+  rsi: number | null,
+  volumeRatio: number
+): number {
+  if (!divergence.type) return 0;
+  
+  let score = divergence.strength;
+  
+  // RSI at extremes confirms divergence
+  if (rsi !== null) {
+    if (divergence.type === 'bearish' && rsi > 70) score += 15;
+    if (divergence.type === 'bullish' && rsi < 30) score += 15;
+    if (divergence.type === 'hidden_bearish' && rsi > 50 && rsi < 70) score += 10;
+    if (divergence.type === 'hidden_bullish' && rsi > 30 && rsi < 50) score += 10;
+  }
+  
+  // Volume declining on divergence is classic confirmation
+  if (volumeRatio < 0.8) score += 10;
+  
+  return Math.min(score, 100);
+}
+
 export const divergenceHunter: Strategy = {
   id: 'divergence-hunter',
   name: 'Divergence Hunter',
-  description: 'Detect price/momentum divergences for reversals',
+  description: 'Reversal strategy: Detect price/momentum divergences at extremes',
   category: 'reversal',
   timeframes: ['1h', '4h', '1d'],
   
@@ -129,7 +174,10 @@ export const divergenceHunter: Strategy = {
     const { price, candles, indicators } = input;
     const { emas, rsi, atr, volume } = indicators;
     
+    // Build price series from candles
     const prices = candles.map(c => c.close);
+    
+    // Build slope series from EMA21
     const ema21Series = emas.series[21] || [];
     const slopeWindow = 5;
     const slopes: number[] = [];
@@ -148,75 +196,86 @@ export const divergenceHunter: Strategy = {
       return {
         type: 'NEUTRAL',
         strength: 0,
-        reasons: ['No divergence - momentum and price aligned'],
+        reasons: ['No divergence detected - momentum and price aligned'],
       };
     }
     
-    // Score the divergence
-    let score = divergence.strength;
-    const reasons: string[] = [divergence.description];
+    const confirmationScore = calculateConfirmationScore(divergence, rsi, volume.ratio);
     
-    // RSI confirmation at extremes
+    const reasons: string[] = [];
+    reasons.push(divergence.description);
+    
     if (rsi !== null) {
-      if (divergence.type === 'bearish' && rsi > 70) {
-        score += 15;
-        reasons.push(`RSI overbought (${rsi.toFixed(0)})`);
-      } else if (divergence.type === 'bullish' && rsi < 30) {
-        score += 15;
-        reasons.push(`RSI oversold (${rsi.toFixed(0)})`);
-      } else if (divergence.type.includes('hidden') && rsi > 40 && rsi < 60) {
-        score += 10;
-        reasons.push(`RSI neutral (${rsi.toFixed(0)}) - good for continuation`);
+      if (rsi > 70) reasons.push(`RSI overbought (${rsi.toFixed(0)})`);
+      if (rsi < 30) reasons.push(`RSI oversold (${rsi.toFixed(0)})`);
+    }
+    
+    let signal: SignalType = 'NEUTRAL';
+    let stop: number | undefined;
+    let target: number | undefined;
+    
+    const ema21 = emas.values[21];
+    
+    // V4 FIX: Use ATR-based stops with minimum 1.5:1 R:R
+    // Key insight: keep original detection (57% win rate), just fix levels
+    const atrValue = atr || price * 0.02;
+    
+    if (confirmationScore >= 70) {
+      if (divergence.type === 'bullish' || divergence.type === 'hidden_bullish') {
+        signal = confirmationScore >= 85 ? 'STRONG_LONG' : 'LONG';
+        
+        // Stop: 1.5x ATR below entry (gives room to breathe)
+        stop = price - (atrValue * 1.5);
+        
+        // Target: At least 1.5x the stop distance (guaranteed positive R:R)
+        const stopDistance = price - stop;
+        const minTarget = price + (stopDistance * 1.5);
+        
+        // If EMA21 is higher, use that; otherwise use min target
+        if (ema21 && ema21 > minTarget) {
+          target = ema21;
+        } else {
+          target = minTarget;
+        }
+        
+      } else {
+        signal = confirmationScore >= 85 ? 'STRONG_SHORT' : 'SHORT';
+        
+        // Stop: 1.5x ATR above entry
+        stop = price + (atrValue * 1.5);
+        
+        // Target: At least 1.5x the stop distance
+        const stopDistance = stop - price;
+        const minTarget = price - (stopDistance * 1.5);
+        
+        // If EMA21 is lower, use that; otherwise use min target
+        if (ema21 && ema21 < minTarget) {
+          target = ema21;
+        } else {
+          target = minTarget;
+        }
+      }
+    } else if (confirmationScore >= 50) {
+      // Weaker signal - tighter stops, smaller targets
+      if (divergence.type === 'bullish' || divergence.type === 'hidden_bullish') {
+        signal = 'LONG';
+        stop = price - (atrValue * 1.2);
+        target = price + (atrValue * 1.8); // 1.5:1 R:R
+      } else {
+        signal = 'SHORT';
+        stop = price + (atrValue * 1.2);
+        target = price - (atrValue * 1.8); // 1.5:1 R:R
       }
     }
     
-    // Volume declining confirms divergence
-    if (volume.ratio < 0.8) {
-      score += 8;
-      reasons.push('Volume declining');
+    if (signal !== 'NEUTRAL') {
+      const rr = stop && target ? Math.abs(target - price) / Math.abs(price - stop) : 0;
+      reasons.push(`R:R ${rr.toFixed(1)}:1`);
     }
-    
-    // Minimum score for signal
-    if (score < 55) {
-      return {
-        type: 'NEUTRAL',
-        strength: Math.round(score),
-        reasons: [...reasons, 'Divergence too weak'],
-      };
-    }
-    
-    // Determine direction
-    const isLong = divergence.type === 'bullish' || divergence.type === 'hidden_bullish';
-    const isStrong = score >= 80;
-    
-    let signal: SignalType;
-    if (isLong) {
-      signal = isStrong ? 'STRONG_LONG' : 'LONG';
-    } else {
-      signal = isStrong ? 'STRONG_SHORT' : 'SHORT';
-    }
-    
-    // V3 FIX: Wider stops (divergences need room to play out)
-    // 1.8x ATR stops, 1.5:1 R:R targets
-    const atrValue = atr || price * 0.015;
-    const stopDistance = atrValue * 1.8; // Wider stops
-    
-    let stop: number;
-    let target: number;
-    
-    if (isLong) {
-      stop = price - stopDistance;
-      target = price + (stopDistance * 1.5); // 1.5:1 R:R
-    } else {
-      stop = price + stopDistance;
-      target = price - (stopDistance * 1.5); // 1.5:1 R:R
-    }
-    
-    reasons.push(`R:R ratio 1.5:1`);
     
     return {
       type: signal,
-      strength: Math.min(Math.round(score), 100),
+      strength: Math.round(confirmationScore),
       entry: price,
       stop,
       target,
