@@ -295,16 +295,16 @@ export const crossoverCascade: Strategy = {
         ? (direction === 'bull' ? 'STRONG_LONG' : 'STRONG_SHORT')
         : (direction === 'bull' ? 'LONG' : 'SHORT');
       
-      // V2: ATR-based stop (consistent risk)
-      const stopDistance = atr * 1.5;
+      // V2.2: Wider stops and targets for swing trades
+      const stopDistance = atr * 2.0;  // Wider stop for swing trades
       
       if (direction === 'bull') {
         stop = price - stopDistance;
-        // V2: Target = 1.5x risk (guaranteed positive R:R)
-        target = price + (stopDistance * 1.5);
+        // V2.2: Target = 2x risk (bigger moves on crossovers)
+        target = price + (stopDistance * 2.0);
       } else {
         stop = price + stopDistance;
-        target = price - (stopDistance * 1.5);
+        target = price - (stopDistance * 2.0);
       }
       
       const rr = Math.abs(target - price) / Math.abs(price - stop);
