@@ -51,11 +51,14 @@ const ALL_STRATEGIES = [
 ];
 
 // How many candles to look back for recent signals
-const LOOKBACK_CANDLES = 5;
+// V3.1: Reduced to 1 (current only) to avoid Vercel timeout
+const LOOKBACK_CANDLES = 1;
 
-// Thresholds
-const SIGNAL_THRESHOLD = 3.0;  // Weighted score to trigger
-const STRONG_THRESHOLD = 5.0;  // Strong signal threshold
+// Thresholds - lowered for single-candle evaluation
+// MACD at 70% = 3.5 * 0.7 = 2.45, Bollinger at 60% = 2.7 * 0.6 = 1.62
+// Two top strategies agreeing = ~4.0
+const SIGNAL_THRESHOLD = 1.5;  // ~1 top strategy or 2 mid-tier
+const STRONG_THRESHOLD = 3.5;  // 2+ top strategies agreeing
 
 function getDirection(signal: SignalType): 'long' | 'short' | 'neutral' {
   if (signal === 'LONG' || signal === 'STRONG_LONG') return 'long';
