@@ -160,12 +160,12 @@ function analyzeCascade(
     freshness = Math.max(0, 100 - cross9_21.barsAgo * 15);
   }
   
-  // Score
+  // Score - V2.1: More generous scoring
   let score = 0;
   if (isCascade) {
-    score = 50 + (freshness * 0.5);  // 50-100 for cascade
+    score = 45 + (freshness * 0.5);  // 45-95 for cascade
   } else if (cross9_21.crossed && cross9_21.direction === direction) {
-    score = 20 + (freshness * 0.3);  // 20-50 for single crossover
+    score = 35 + (freshness * 0.3);  // 35-65 for single crossover with 9/21
   }
   
   return {
@@ -245,29 +245,18 @@ export const crossoverCascade: Strategy = {
       return { type: 'NEUTRAL', strength: 0, reasons: ['No EMA alignment - waiting'] };
     }
     
-    // V2: Require cascade (not just single crossover)
-    if (!cascade.isCascade) {
-      return { 
-        type: 'NEUTRAL', 
-        strength: 0, 
-        reasons: [`Partial ${cascade.direction} signal - waiting for full cascade`] 
-      };
-    }
-    
-    // V2: Require fresh cascade (< 5 bars ago on average)
-    if (cascade.freshness < 40) {
-      return { 
-        type: 'NEUTRAL', 
-        strength: 0, 
-        reasons: [`Stale cascade (freshness ${cascade.freshness.toFixed(0)}%) - too late to enter`] 
-      };
-    }
+    // V2.1: Allow partial crossover but penalize score
+    // V2.1: Loosen freshness requirement
     
     const direction = cascade.direction;
     const reasons: string[] = [];
     let score = cascade.score;
     
-    reasons.push(`${direction === 'bull' ? '📈' : '📉'} ${direction.toUpperCase()} cascade confirmed`);
+    if (cascade.isCascade) {
+      reasons.push(`${direction === 'bull' ? '📈' : '📉'} ${direction.toUpperCase()} cascade confirmed`);
+    } else {
+      reasons.push(`${direction === 'bull' ? '📈' : '📉'} ${direction.toUpperCase()} crossover (9/21)`);
+    }
     reasons.push(`Freshness: ${cascade.freshness.toFixed(0)}%`);
     
     // Momentum confirmation
@@ -300,8 +289,9 @@ export const crossoverCascade: Strategy = {
     let stop: number | undefined;
     let target: number | undefined;
     
-    if (score >= 60) {
-      signal = score >= 80 
+    // V2.1: Lower threshold since we're more selective elsewhere
+    if (score >= 45) {
+      signal = score >= 70 
         ? (direction === 'bull' ? 'STRONG_LONG' : 'STRONG_SHORT')
         : (direction === 'bull' ? 'LONG' : 'SHORT');
       
