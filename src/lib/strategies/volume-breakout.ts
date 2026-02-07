@@ -217,20 +217,22 @@ export const volumeBreakout: Strategy = {
     
     const atrStop = atr ? atr * 1.2 : price * 0.015; // Tighter stop for breakouts
     
-    if (score >= 55) {
-      signal = score >= 75 
+    // V4: Higher threshold for better win rate
+    if (score >= 60) {
+      signal = score >= 80 
         ? (direction === 'up' ? 'STRONG_LONG' : 'STRONG_SHORT')
         : (direction === 'up' ? 'LONG' : 'SHORT');
       
+      // V4: Better R:R (3:1) for breakout trades
       if (direction === 'up') {
         // Stop below breakout level
         const breakoutLevel = Math.max(...candles.slice(-21, -1).map(c => c.high));
         stop = Math.max(breakoutLevel * 0.995, price - atrStop);
-        target = price + (atrStop * 2.5);
+        target = price + (atrStop * 3.0); // 3:1 R:R for breakouts
       } else {
         const breakoutLevel = Math.min(...candles.slice(-21, -1).map(c => c.low));
         stop = Math.min(breakoutLevel * 1.005, price + atrStop);
-        target = price - (atrStop * 2.5);
+        target = price - (atrStop * 3.0); // 3:1 R:R for breakouts
       }
     }
     

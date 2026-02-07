@@ -72,29 +72,30 @@ export const meanReversion: Strategy = {
       return { type: 'NEUTRAL', strength: 0, reasons: ['Need RSI data'] };
     }
     
+    // V8: RSI tiered scoring with broader acceptance
     if (isOversold) {
-      if (rsi >= 35) {
+      if (rsi >= 40) {
         return { type: 'NEUTRAL', strength: 0, reasons: [`RSI ${rsi.toFixed(0)} not oversold enough`] };
       }
       if (rsi < 20) {
-        score += 40;
+        score += 45;
         reasons.push(`🔥 RSI extremely oversold (${rsi.toFixed(0)})`);
       } else if (rsi < 30) {
-        score += 30;
+        score += 35;
         reasons.push(`RSI oversold (${rsi.toFixed(0)})`);
       } else {
         score += 20;
         reasons.push(`RSI low (${rsi.toFixed(0)})`);
       }
     } else {
-      if (rsi <= 65) {
+      if (rsi <= 60) {
         return { type: 'NEUTRAL', strength: 0, reasons: [`RSI ${rsi.toFixed(0)} not overbought enough`] };
       }
       if (rsi > 80) {
-        score += 40;
+        score += 45;
         reasons.push(`🔥 RSI extremely overbought (${rsi.toFixed(0)})`);
       } else if (rsi > 70) {
-        score += 30;
+        score += 35;
         reasons.push(`RSI overbought (${rsi.toFixed(0)})`);
       } else {
         score += 20;
