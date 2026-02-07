@@ -37,8 +37,8 @@ export const meanReversion: Strategy = {
     const deviation = ((price - ema21) / ema21) * 100;
     const absDeviation = Math.abs(deviation);
     
-    // V6: Require 3% deviation minimum (more extreme = higher probability)
-    if (absDeviation < 3.0) {
+    // V7: 2.5% threshold (balance between signal quality and quantity)
+    if (absDeviation < 2.5) {
       return { type: 'NEUTRAL', strength: 0, reasons: ['Price within normal range'] };
     }
     
@@ -144,33 +144,23 @@ export const meanReversion: Strategy = {
       }
     }
     
-    // V6: REQUIRE reversal candle confirmation (not just bonus)
+    // V7: Reversal candle is strong bonus (not required - RSI extreme is key)
     if (candles.length >= 2) {
       const current = candles[candles.length - 1];
       const prev = candles[candles.length - 2];
       const currentBody = current.close - current.open;
       const prevBody = prev.close - prev.open;
       
-      // Bullish reversal: need green candle after red
-      if (isOversold) {
-        if (currentBody > 0 && prevBody < 0) {
-          score += 15;
-          reasons.push('✓ Bullish reversal candle');
-        } else if (currentBody <= 0) {
-          return { type: 'NEUTRAL', strength: 0, reasons: ['Waiting for bullish reversal candle'] };
-        }
+      // Bullish reversal candle bonus
+      if (isOversold && currentBody > 0 && prevBody < 0) {
+        score += 20;
+        reasons.push('✓ Bullish reversal candle');
       }
-      // Bearish reversal: need red candle after green
-      if (isOverbought) {
-        if (currentBody < 0 && prevBody > 0) {
-          score += 15;
-          reasons.push('✓ Bearish reversal candle');
-        } else if (currentBody >= 0) {
-          return { type: 'NEUTRAL', strength: 0, reasons: ['Waiting for bearish reversal candle'] };
-        }
+      // Bearish reversal candle bonus
+      if (isOverbought && currentBody < 0 && prevBody > 0) {
+        score += 20;
+        reasons.push('✓ Bearish reversal candle');
       }
-    } else {
-      return { type: 'NEUTRAL', strength: 0, reasons: ['Insufficient candle data'] };
     }
     
     // Need minimum score

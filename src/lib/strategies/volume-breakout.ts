@@ -173,19 +173,25 @@ export const volumeBreakout: Strategy = {
       reasons.push(`Momentum: ${momentum.toFixed(1)}%`);
     }
     
-    // V2: REQUIRE EMA alignment (only trade breakouts with trend)
+    // V3: EMA alignment is strong bonus (helps win rate) but not required
     const ema21 = emas.values[21];
     const ema50 = emas.values[50];
     if (ema21 && ema50) {
       if (direction === 'up' && price > ema21 && ema21 > ema50) {
-        score += 15;
+        score += 20;
         reasons.push('✓ Trend aligned (EMAs bullish)');
       } else if (direction === 'down' && price < ema21 && ema21 < ema50) {
-        score += 15;
+        score += 20;
         reasons.push('✓ Trend aligned (EMAs bearish)');
+      } else if (direction === 'up' && price > ema21) {
+        score += 10;
+        reasons.push('Price above EMA21');
+      } else if (direction === 'down' && price < ema21) {
+        score += 10;
+        reasons.push('Price below EMA21');
       } else {
-        // Counter-trend breakout - skip
-        return { type: 'NEUTRAL', strength: 0, reasons: ['Breakout against trend - skipping'] };
+        score -= 15;
+        reasons.push('⚠️ Counter-trend breakout');
       }
     }
     
@@ -211,7 +217,7 @@ export const volumeBreakout: Strategy = {
     
     const atrStop = atr ? atr * 1.2 : price * 0.015; // Tighter stop for breakouts
     
-    if (score >= 50) {
+    if (score >= 55) {
       signal = score >= 75 
         ? (direction === 'up' ? 'STRONG_LONG' : 'STRONG_SHORT')
         : (direction === 'up' ? 'LONG' : 'SHORT');
