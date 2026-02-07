@@ -231,6 +231,13 @@ export function SignalsTab({ signals, onClearSignals, currentPrices = {} }: Sign
   
   const stats = useMemo(() => calculateStrategyStats(signals), [signals]);
   
+  // Debug: Log price data
+  const priceKeys = Object.keys(currentPrices);
+  const openSignals = signals.filter(s => s.status === 'OPEN');
+  const debugInfo = openSignals.length > 0 
+    ? `Prices: [${priceKeys.join(', ')}] | Open: [${openSignals.map(s => s.symbol).join(', ')}]`
+    : null;
+  
   const filteredSignals = useMemo(() => {
     let result = [...signals];
     
@@ -280,6 +287,13 @@ export function SignalsTab({ signals, onClearSignals, currentPrices = {} }: Sign
   
   return (
     <div className="space-y-4">
+      {/* Debug Info */}
+      {debugInfo && (
+        <div className="text-[10px] text-amber-400 bg-amber-500/10 px-3 py-1 rounded font-mono">
+          🔍 {debugInfo}
+        </div>
+      )}
+      
       {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-3">
