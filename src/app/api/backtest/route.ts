@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runBacktest, Candle, BacktestResult } from '@/lib/backtest';
 
+// Force dynamic rendering - no caching
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 const BINANCE_US_API = 'https://api.binance.us/api/v3';
 
 interface KlineResponse {
