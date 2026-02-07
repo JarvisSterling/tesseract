@@ -138,6 +138,8 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({
       success: true,
+      version: 'v2-ultimate',  // Track deployment version
+      strategyCount: 10,       // Should be 10 with Ultimate
       data: result,
     });
     

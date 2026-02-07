@@ -110,9 +110,9 @@ async function analyze() {
   console.log('🔬 TESSERACT STRATEGY ANALYSIS\n');
   console.log('='.repeat(60));
   
-  // Run 365d backtest - sequential to avoid Vercel timeouts
-  const symbols = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP'];
-  const days = 365;
+  // Run 30d backtest - shorter to test if Ultimate shows up
+  const symbols = ['BTC'];
+  const days = 30;
   console.log(`\n📊 Running ${days}-day backtest on: ${symbols.join(', ')}`);
   console.log('   (Sequential mode to avoid API timeouts)\n');
   
