@@ -454,12 +454,30 @@ export default function Dashboard() {
   }, [data, wsPrices]);
   
   // Track new signals from strategies (database-backed)
+  // BLACKLIST: Stablecoins and non-crypto assets
+  const BLACKLISTED_SYMBOLS = ['USDC', 'USDT', 'DAI', 'FDUSD', 'TUSD', 'BUSD', 'PAXG', 'UST', 'USDP'];
+  
   useEffect(() => {
     if (data.length === 0) return;
     
     const processSignals = async () => {
+      // Track which symbols already have open positions (prevent duplicates)
+      const symbolsWithOpenSignals = new Set(
+        trackedSignals.filter(s => s.status === 'OPEN').map(s => s.symbol)
+      );
+      
       for (const crypto of data) {
         if (!crypto.strategies) continue;
+        
+        // FIX 1: Skip blacklisted symbols (stablecoins)
+        if (BLACKLISTED_SYMBOLS.includes(crypto.symbol)) continue;
+        
+        // FIX 2: Skip if symbol already has an open position (prevent duplicates)
+        if (symbolsWithOpenSignals.has(crypto.symbol)) continue;
+        
+        // FIX 3: Market regime filter - check confluence score
+        const isBullish = crypto.confluence.score >= 55;
+        const isBearish = crypto.confluence.score <= 45;
         
         for (const strategy of crypto.strategies) {
           // Only track non-neutral signals with entry/stop/target
@@ -469,8 +487,16 @@ export default function Dashboard() {
           // Only track HIGH CONFIDENCE signals (70%+)
           if (strategy.signal.strength < 70) continue;
           
-          // Create unique key for this signal
-          const signalKey = `${crypto.symbol}-${strategy.id}-${strategy.signal.type}`;
+          // FIX 3: Market regime filter - only go with the trend
+          const isLongSignal = strategy.signal.type.includes('LONG');
+          const isShortSignal = strategy.signal.type.includes('SHORT');
+          
+          // Skip longs in bearish regime, shorts in bullish regime
+          if (isLongSignal && isBearish) continue;
+          if (isShortSignal && isBullish) continue;
+          
+          // Create unique key for this signal (per symbol, not per strategy)
+          const signalKey = `${crypto.symbol}-${strategy.signal.type}`;
           
           // Skip if already in local cache (quick check)
           if (processedSignalsRef.current.has(signalKey)) continue;
@@ -485,6 +511,9 @@ export default function Dashboard() {
           // Mark as processed in database (30 min expiry)
           await markSignalProcessed(signalKey, 30);
           processedSignalsRef.current.add(signalKey);
+          
+          // Add to local tracking to prevent more signals for this symbol
+          symbolsWithOpenSignals.add(crypto.symbol);
           
           // Track the signal in database
           const newSignal = await addSignal({
@@ -508,6 +537,9 @@ export default function Dashboard() {
               return [...prev, newSignal];
             });
           }
+          
+          // Break after first valid signal for this symbol (prevent duplicates)
+          break;
         }
       }
     };
