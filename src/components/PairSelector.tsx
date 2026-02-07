@@ -175,7 +175,10 @@ export function PairSelector({ selectedPairs, onPairsChange }: PairSelectorProps
             </button>
           </span>
         ))}
-        
+      </div>
+      
+      {/* Action buttons row */}
+      <div className="flex items-center gap-3 mb-2">
         {/* Add button / Search input */}
         <div className="relative">
           {isOpen ? (
@@ -203,31 +206,6 @@ export function PairSelector({ selectedPairs, onPairsChange }: PairSelectorProps
               Add Pair
             </button>
           )}
-          
-          {/* Add Top N pairs */}
-          <div className="flex items-center gap-1 ml-2">
-            <span className="text-[10px] text-zinc-500">Top</span>
-            <input
-              type="number"
-              min={5}
-              max={200}
-              value={topN}
-              onChange={(e) => setTopN(Math.min(200, Math.max(5, parseInt(e.target.value) || 20)))}
-              className="w-12 px-1.5 py-0.5 text-[10px] text-center bg-zinc-900 border border-zinc-700 rounded focus:outline-none focus:border-amber-500 text-white"
-            />
-            <button
-              onClick={addTopPairs}
-              disabled={loadingTop}
-              className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600/30 transition-colors disabled:opacity-50"
-            >
-              {loadingTop ? (
-                <Loader2 size={10} className="animate-spin" />
-              ) : (
-                <TrendingUp size={10} />
-              )}
-              Add Top
-            </button>
-          </div>
           
           {/* Dropdown */}
           {isOpen && (
@@ -260,6 +238,34 @@ export function PairSelector({ selectedPairs, onPairsChange }: PairSelectorProps
               ))}
             </div>
           )}
+        </div>
+        
+        {/* Separator */}
+        <div className="w-px h-4 bg-zinc-700" />
+        
+        {/* Add Top N pairs */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-zinc-500">Top</span>
+          <input
+            type="number"
+            min={5}
+            max={200}
+            value={topN}
+            onChange={(e) => setTopN(Math.min(200, Math.max(5, parseInt(e.target.value) || 20)))}
+            className="w-12 px-1.5 py-0.5 text-[10px] text-center bg-zinc-900 border border-zinc-700 rounded focus:outline-none focus:border-amber-500 text-white"
+          />
+          <button
+            onClick={addTopPairs}
+            disabled={loadingTop}
+            className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600/30 transition-colors disabled:opacity-50"
+          >
+            {loadingTop ? (
+              <Loader2 size={10} className="animate-spin" />
+            ) : (
+              <TrendingUp size={10} />
+            )}
+            Add Top
+          </button>
         </div>
       </div>
       
