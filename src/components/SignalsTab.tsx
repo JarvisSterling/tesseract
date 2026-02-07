@@ -231,12 +231,10 @@ export function SignalsTab({ signals, onClearSignals, currentPrices = {} }: Sign
   
   const stats = useMemo(() => calculateStrategyStats(signals), [signals]);
   
-  // Debug: Log price data
+  // Debug: Log price data - ALWAYS show
   const priceKeys = Object.keys(currentPrices);
   const openSignals = signals.filter(s => s.status === 'OPEN');
-  const debugInfo = openSignals.length > 0 
-    ? `Prices: [${priceKeys.join(', ')}] | Open: [${openSignals.map(s => s.symbol).join(', ')}]`
-    : null;
+  const debugInfo = `Live prices: ${priceKeys.length} symbols [${priceKeys.slice(0, 5).join(', ')}${priceKeys.length > 5 ? '...' : ''}] | Open positions: ${openSignals.length}`;
   
   const filteredSignals = useMemo(() => {
     let result = [...signals];
@@ -287,12 +285,10 @@ export function SignalsTab({ signals, onClearSignals, currentPrices = {} }: Sign
   
   return (
     <div className="space-y-4">
-      {/* Debug Info */}
-      {debugInfo && (
-        <div className="text-[10px] text-amber-400 bg-amber-500/10 px-3 py-1 rounded font-mono">
-          🔍 {debugInfo}
-        </div>
-      )}
+      {/* Debug Info - Always visible */}
+      <div className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-3 py-2 rounded font-mono">
+        🔍 {debugInfo}
+      </div>
       
       {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
