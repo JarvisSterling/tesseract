@@ -56,11 +56,12 @@ async function analyze() {
   console.log('🔬 TESSERACT STRATEGY ANALYSIS\n');
   console.log('='.repeat(60));
   
-  // Run 90-day backtest on major coins
+  // Run 180-day backtest on major coins (double the data!)
   const symbols = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP'];
-  console.log(`\n📊 Running 90-day backtest on: ${symbols.join(', ')}\n`);
+  const days = 180;
+  console.log(`\n📊 Running ${days}-day backtest on: ${symbols.join(', ')}\n`);
   
-  const results = await runBacktest(symbols, 90);
+  const results = await runBacktest(symbols, days);
   
   // Aggregate strategy stats across all symbols
   const strategyAgg = new Map<string, {
