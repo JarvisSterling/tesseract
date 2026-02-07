@@ -48,7 +48,7 @@ async function fetchKlinesBatch(
     
     try {
       const res = await fetch(url, { 
-        next: { revalidate: 300 },
+        cache: 'no-store',  // Disable cache to get fresh results
         headers: { 'Accept': 'application/json' }
       });
       
@@ -56,7 +56,7 @@ async function fetchKlinesBatch(
         // Try USDT pair
         const usdtUrl = `${BINANCE_US_API}/klines?symbol=${symbol}USDT&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=${batchLimit}`;
         const usdtRes = await fetch(usdtUrl, { 
-          next: { revalidate: 300 },
+          cache: 'no-store',
           headers: { 'Accept': 'application/json' }
         });
         
