@@ -72,8 +72,7 @@ async function runBacktestSequential(symbols: string[], days: number): Promise<B
   for (const symbol of symbols) {
     console.log(`   Fetching ${symbol}...`);
     const timestamp = Date.now();
-    // Use backtest2 endpoint to bypass edge cache
-    const res = await fetch(`https://tesseract-black.vercel.app/api/backtest2?symbol=${symbol}&days=${days}&t=${timestamp}`, {
+    const res = await fetch(`https://tesseract-black.vercel.app/api/backtest?symbol=${symbol}&days=${days}&t=${timestamp}&v=2`, {
       headers: { 
         'Cache-Control': 'no-cache',
       },
