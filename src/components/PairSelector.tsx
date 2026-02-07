@@ -1,11 +1,16 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, X, Plus, Loader2 } from 'lucide-react';
+import { Search, X, Plus, Loader2, TrendingUp } from 'lucide-react';
 
 interface PairSelectorProps {
   selectedPairs: string[];
   onPairsChange: (pairs: string[]) => void;
+}
+
+interface TickerData {
+  symbol: string;
+  quoteVolume: string;
 }
 
 interface BinancePair {
@@ -45,6 +50,8 @@ export function PairSelector({ selectedPairs, onPairsChange }: PairSelectorProps
   const [allPairs, setAllPairs] = useState<BinancePair[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [topN, setTopN] = useState<number>(20);
+  const [loadingTop, setLoadingTop] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -109,6 +116,47 @@ export function PairSelector({ selectedPairs, onPairsChange }: PairSelectorProps
     savePairs(newPairs);
   }, [selectedPairs, onPairsChange]);
 
+  // Fetch and add top N pairs by 24h volume
+  const addTopPairs = useCallback(async () => {
+    setLoadingTop(true);
+    try {
+      // Get 24h ticker data sorted by volume
+      const res = await fetch('https://api.binance.com/api/v3/ticker/24hr');
+      const tickers: TickerData[] = await res.json();
+      
+      // Filter USDT pairs and sort by quote volume (USD volume)
+      const usdtTickers = tickers
+        .filter(t => 
+          t.symbol.endsWith('USDT') && 
+          !t.symbol.includes('UP') && 
+          !t.symbol.includes('DOWN') &&
+          !t.symbol.includes('BULL') &&
+          !t.symbol.includes('BEAR')
+        )
+        .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+        .slice(0, topN);
+      
+      // Extract base assets and merge with existing (no duplicates)
+      const topAssets = usdtTickers.map(t => t.symbol.replace('USDT', ''));
+      const existingSet = new Set(selectedPairs);
+      const newPairs = [...selectedPairs];
+      
+      for (const asset of topAssets) {
+        if (!existingSet.has(asset)) {
+          newPairs.push(asset);
+          existingSet.add(asset);
+        }
+      }
+      
+      onPairsChange(newPairs);
+      savePairs(newPairs);
+    } catch (e) {
+      console.error('Failed to fetch top pairs:', e);
+    } finally {
+      setLoadingTop(false);
+    }
+  }, [topN, selectedPairs, onPairsChange]);
+
   return (
     <div className="relative" ref={dropdownRef}>
       {/* Selected pairs as tags */}
@@ -155,6 +203,31 @@ export function PairSelector({ selectedPairs, onPairsChange }: PairSelectorProps
               Add Pair
             </button>
           )}
+          
+          {/* Add Top N pairs */}
+          <div className="flex items-center gap-1 ml-2">
+            <span className="text-[10px] text-zinc-500">Top</span>
+            <input
+              type="number"
+              min={5}
+              max={200}
+              value={topN}
+              onChange={(e) => setTopN(Math.min(200, Math.max(5, parseInt(e.target.value) || 20)))}
+              className="w-12 px-1.5 py-0.5 text-[10px] text-center bg-zinc-900 border border-zinc-700 rounded focus:outline-none focus:border-amber-500 text-white"
+            />
+            <button
+              onClick={addTopPairs}
+              disabled={loadingTop}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600/30 transition-colors disabled:opacity-50"
+            >
+              {loadingTop ? (
+                <Loader2 size={10} className="animate-spin" />
+              ) : (
+                <TrendingUp size={10} />
+              )}
+              Add Top
+            </button>
+          </div>
           
           {/* Dropdown */}
           {isOpen && (
