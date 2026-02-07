@@ -99,7 +99,7 @@ export function runBacktest(
     startEquity = 10000,
     positionSizePercent = 2, // Risk 2% per trade
     maxOpenPositions = 5,
-    minSignalStrength = 50,
+    minSignalStrength = 70, // Only high-confidence signals (70%+)
   } = options;
 
   const trades: BacktestTrade[] = [];
